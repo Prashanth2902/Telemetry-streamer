@@ -114,6 +114,10 @@ struct Sample {
 static_assert(std::is_trivially_copyable_v<Sample>);
 ```
 
+Identity and sequencing rules:
+- **`seq` is assigned by the source when the sample is created, before `try_push`.** A sample rejected by a full ring still consumes its `seq`, so every ring drop shows up downstream as a sequence gap. Compare `seq` values with unsigned wraparound arithmetic.
+- **Source id 0 is reserved for the pipeline.** Health samples carry `source_id = 0`, `kind = Health`, a `seq` from a pipeline-owned counter, and `t_capture_ns` = the time the monitor raised the event. The affected source goes in `HealthData::source_id`. The receiver tracks gaps for source 0 like any other source.
+
 ### 4.2 Wire schema (`proto/telemetry.proto`)
 
 ```proto
@@ -145,10 +149,14 @@ message Batch {
 Each TCP frame looks like this:
 
 ```
-| magic u16 = 0x7473 | version u8 = 1 | flags u8 | length u32 (big-endian) | Batch bytes |
+| magic u16 = 0x7473 | version u8 = 1 | flags u8 | length u32 | Batch bytes |
 ```
 
-The receiver rejects frames with a bad magic or version, or with a length above the configured maximum (for example 1 MiB), and counts each rejection. Write and fuzz the framing code as its own unit.
+- The header is exactly 8 bytes. All multi-byte header fields are big-endian (network byte order), so the magic appears on the wire as the bytes `0x74 0x73` ("ts").
+- `length` is the size of the Batch payload only, excluding the 8-byte header. It must be greater than 0 and at most `transport.max_frame_bytes` (default 1 MiB).
+- `flags` is reserved in v1: the sender writes 0 and the receiver rejects nonzero values. New meanings come with a version bump.
+
+The receiver rejects frames with a bad magic, version, flags, or length, and counts each rejection by reason. A bad header means the byte stream can't be resynchronized, so the receiver closes the connection and the sender reconnects. Write and fuzz the framing code as its own unit.
 
 ### 4.4 Timestamps and latency
 
@@ -163,7 +171,7 @@ This is the centerpiece. Write it yourself and be ready to explain every line in
 Requirements:
 - `template <typename T, size_t Capacity> class SpscRing`, where `Capacity` is a power of two and `T` is trivially copyable.
 - Storage is a fixed array with no allocation after construction.
-- `head_` (consumer index) and `tail_` (producer index) are `std::atomic<size_t>`, each on its own cache line (`alignas(64)`). Use `std::hardware_destructive_interference_size` where the compiler supports it, with 64 as the fallback.
+- `head_` (consumer index) and `tail_` (producer index) are `std::atomic<size_t>`, each on its own cache line via a project constant `kCacheLine = 64` (`alignas(kCacheLine)`). Don't use `std::hardware_destructive_interference_size`: its value can differ between compilers and flags, and GCC warns (`-Winterference-size`) when it is used in a header, which fails the build under `-Werror`. Benchmark 64 vs 128 (adjacent-line prefetch) and record the result.
 - Producer: write the slot, then `tail_.store(..., memory_order_release)`. Consumer: `tail_.load(memory_order_acquire)`, then read the slot. The reverse direction mirrors this for `head_`.
 - Optimization: each side keeps a non-atomic cached copy of the other side's index and refreshes it only when the ring appears full or empty. Benchmark the effect.
 - API: `bool try_push(const T&)`, `bool try_pop(T&)`, `size_t try_pop_bulk(T* out, size_t max)`, `size_t size_approx() const`.
@@ -180,11 +188,14 @@ When a source's ring is full, apply the policy configured for that source:
 
 | Policy | Behavior | Use for |
 |---|---|---|
-| `drop_newest` | Reject the new sample and increment `dropped_newest` | High-rate sensor streams where the latest-but-one is fine |
-| `drop_oldest` | Consumer-side trimming isn't possible with a pure SPSC ring, so the producer increments a "pressure" flag and the pipeline skips stale entries | Document the trade-off, or omit this policy and explain why |
-| `block_with_timeout` | Spin, then yield, until space frees or the timeout expires, then drop | Low-rate critical data (battery, health) |
+| `drop_newest` | Reject the new sample and increment `dropped_newest` | High-rate sensor streams, where losing an occasional sample is acceptable |
+| `block_with_timeout` | Spin, then yield, until space frees or the timeout expires, then drop and increment `dropped_timeout` | Low-rate critical data (battery, GPS) |
 
-On the transport side, if the socket send buffer is full (`EAGAIN`), keep at most K pending encoded batches. Beyond that, drop whole batches and count them. All drops show up in stats and in the final report. A system that silently loses data counts as a bug.
+**No `drop_oldest`.** Evicting the oldest entry would mean the producer advancing `head_`, which the consumer owns. That breaks the single-writer-per-index invariant the SPSC ring depends on, and would need a CAS loop or a different queue. The rejected alternatives (MPMC queue, overwrite ring with per-slot sequence numbers) go in `docs/design-decisions.md`. Health samples never pass through a ring: the pipeline thread creates them and appends them directly to the current batch.
+
+On the transport side, if the socket send buffer is full (`EAGAIN`), keep at most `max_pending_batches` (K) encoded batches. Beyond that, drop whole batches, count them, and count the samples they contained per source, so receiver-side gaps can be reconciled with sender-side drops (§13). The pending batches live in K fixed buffers allocated at startup, each sized to the worst-case encoded batch (see §9), plus a write offset to handle partial writes. Nothing is allocated when a batch is queued.
+
+All drops show up in stats and in the final report. A system that silently loses data counts as a bug.
 
 ## 7. Health monitoring
 
@@ -200,8 +211,12 @@ struct HealthMonitor {
 ```
 
 Monitors:
-- **Stale source**: no sample from source X for more than `stale_ms`.
+- **Stale source**: no sample from source X for more than its stale threshold.
 - **Rate deviation**: the measured rate over a sliding window is outside ±`rate_tolerance_pct` of the expected rate.
+
+Thresholds are per source, because sources differ in rate by 1000×. A single global `stale_ms` of 50 would flag a 1 Hz source as stale all the time. Defaults are derived from each source's period (`1000 / rate_hz` ms), and a source can override them (see §10):
+- stale threshold = `max(stale_min_ms, stale_periods × period)`. The floor keeps scheduler jitter from raising false alarms on fast sources.
+- rate window = `max(rate_window_ms, rate_min_samples × period)`, so a 1 Hz source is judged over at least `rate_min_samples` samples, not one
 - **Sequence gap**: `seq` jumped, so samples were dropped upstream.
 - **Frozen value** (optional): the payload is bit-identical for more than `frozen_count` consecutive samples.
 
@@ -222,7 +237,11 @@ Each fault has an integration test asserting that the expected health event or d
 ## 9. Memory discipline
 
 - The steady-state hot path (source push, pipeline drain, monitor, encode, send) must not allocate.
-- The Protobuf `Batch` object is reused. `Clear()` keeps allocated capacity for repeated fields, so after a warmup period, encoding a batch of the same or smaller size does not allocate. Serialize with `SerializeToArray` into a preallocated buffer. Consider a `google::protobuf::Arena` and measure whether it helps.
+- **Reusing a heap-allocated `Batch` is not enough.** `Clear()` keeps the cleared `Sample` elements of a repeated field, but `Sample` has a `oneof`. Clearing a oneof, or switching its case (the slot that held an `Imu` last batch holds a `Gps` this batch), deletes the old submessage and allocates a new one. Batches mix kinds, so this allocates on every batch.
+- **Decision:** build each `Batch` on a `google::protobuf::Arena` whose initial block is a buffer owned by the encoder and allocated at startup (`ArenaOptions::initial_block`). After the batch is serialized, `Reset()` the arena. The arena keeps the user-supplied initial block, so steady-state batches allocate nothing as long as they fit in it. Size the block from `max_samples` and verify the size with the allocation test.
+- **Fallback:** if the allocation test still finds allocations (for example, arena-internal bookkeeping in the installed Protobuf version), encode directly with `google::protobuf::io::CodedOutputStream` over a preallocated array. The `.proto` stays the schema and the receiver keeps using generated parsing. Record which path was taken in `docs/design-decisions.md`.
+- Serialize into a preallocated output buffer sized to the worst-case encoded batch: `max_samples` × the largest encoded `Sample`, plus `Batch` overhead and the 8-byte frame header. Config validation fails if this exceeds `transport.max_frame_bytes`. The same bound sizes the transport's pending buffers (§6).
+- Verify the zero-allocation property with the encoder unit test as soon as the encoder exists (M3), not only in M6.
 - **Verification test:** install a global `operator new` / `operator delete` override in a test binary that counts allocations. Run the pipeline through a warmup period, reset the counter, run N batches, and assert zero allocations.
 
 ## 10. Configuration
@@ -234,24 +253,41 @@ Use a JSON file loaded with nlohmann/json. Example:
   "sources": [
     { "id": 1, "type": "sim_imu",     "rate_hz": 1000, "ring_capacity": 4096, "policy": "drop_newest" },
     { "id": 2, "type": "sim_gps",     "rate_hz": 10,   "ring_capacity": 256,  "policy": "block_with_timeout", "timeout_us": 500 },
-    { "id": 3, "type": "sim_battery", "rate_hz": 1,    "ring_capacity": 64,   "policy": "block_with_timeout", "timeout_us": 500 }
+    { "id": 3, "type": "sim_battery", "rate_hz": 1,    "ring_capacity": 64,   "policy": "block_with_timeout", "timeout_us": 500,
+      "health": { "stale_ms": 5000 } }
   ],
   "batch": { "max_samples": 256, "max_delay_us": 2000 },
-  "transport": { "host": "127.0.0.1", "port": 9000, "max_pending_batches": 64 },
-  "health": { "stale_ms": 50, "rate_tolerance_pct": 20, "rate_window_ms": 1000 },
+  "transport": { "host": "127.0.0.1", "port": 9000, "max_pending_batches": 64, "max_frame_bytes": 1048576 },
+  "health": { "stale_periods": 3, "stale_min_ms": 20, "rate_tolerance_pct": 20, "rate_window_ms": 1000, "rate_min_samples": 10 },
   "seed": 42
 }
 ```
 
-Validate at startup: ring capacity must be a power of two, rates must be positive, ports must be in range, and source ids must be unique. Invalid config means a clear error and a nonzero exit code.
+The top-level `health` block holds defaults expressed relative to each source's period (§7). A source's optional `health` block overrides them with absolute values (`stale_ms`, `rate_window_ms`, `rate_tolerance_pct`). With the example above, the effective stale thresholds are 20 ms (IMU, the floor), 300 ms (GPS), and 5000 ms (battery, overridden). The effective rate windows are 1 s (IMU, GPS) and 10 s (battery).
+
+Configs shipped in `configs/`:
+- `default.json`: the example above. Tuned for zero drops, not for minimum latency.
+- `bench.json`: same sources with `max_delay_us` ≤ 500, used for the latency targets in §14.
+- `stress.json`, `faults.json`: see §13 and §8.
+
+Validate at startup:
+- Ring capacity is a power of two, and rates are positive.
+- Ports are in range.
+- Source ids are unique and in 1–65535 (0 is reserved for the pipeline, §4.1).
+- `block_with_timeout` has a `timeout_us`.
+- The worst-case encoded batch fits in `max_frame_bytes` (§9).
+
+Invalid config means a clear error and a nonzero exit code.
 
 ## 11. Build, tooling, and dependencies
 
 - C++20, CMake ≥ 3.20 with `CMakePresets.json` presets: `debug`, `release`, `asan` (ASan + UBSan), and `tsan`.
-- Dependencies, either system packages or vcpkg: Protobuf (+ `protoc`), GoogleTest/GMock, Google Benchmark, nlohmann/json, spdlog (or fmt).
+- Dependencies come from Ubuntu system packages (apt) only, no vcpkg: Protobuf (+ `protoc`), GoogleTest/GMock, Google Benchmark, nlohmann/json, spdlog (or fmt). Find them with CMake `find_package`.
 - Warnings: `-Wall -Wextra -Wpedantic -Werror` in CI.
 - `.clang-format` and `.clang-tidy` (modernize-*, performance-*, bugprone-*, concurrency-*).
 - GitHub Actions: gcc and clang × {debug, asan, tsan}. Run unit tests in all configurations, integration tests in debug, and a short benchmark smoke run in release.
+- CI runner: use an `ubuntu-26.04` image to match the dev environment if GitHub offers one. Otherwise use `ubuntu-24.04` (older gcc/clang/gtest) and keep the code within what those compilers support. Install dependencies with the same apt package list as §11.1.
+- TSan on recent Ubuntu kernels: high ASLR entropy makes TSan binaries abort at startup ("unexpected memory mapping"). Run `sudo sysctl vm.mmap_rnd_bits=28` in the CI job before the tests, and locally if TSan fails the same way.
 - `vcan` tests (M7): GitHub-hosted runners may lack the `vcan` kernel module. Make these tests skip automatically when `vcan0` isn't available, and document local setup:
   ```bash
   sudo modprobe vcan
@@ -263,12 +299,12 @@ Validate at startup: ring capacity must be a power of two, rates must be positiv
 
 ### 11.1 Development environment: Windows host
 
-The project targets Linux: it uses epoll, POSIX signals, and SocketCAN, and Linux is what embedded/automotive teams use. On Windows, develop inside **WSL2 (Ubuntu 24.04)** rather than porting to MSVC.
+The project targets Linux: it uses epoll, POSIX signals, and SocketCAN, and Linux is what embedded/automotive teams use. On Windows, develop inside **WSL2 (Ubuntu 26.04)** rather than porting to MSVC.
 
 Setup:
 ```powershell
-# PowerShell (admin)
-wsl --install -d Ubuntu-24.04
+# PowerShell (admin). `wsl --list --online` shows the exact distro name.
+wsl --install -d Ubuntu-26.04
 ```
 ```bash
 # inside Ubuntu
@@ -285,7 +321,8 @@ Rules:
 - Sanitizers (ASan, UBSan, TSan) work in WSL2 with gcc and clang.
 
 Known WSL2 limitations:
-- **vcan (M7):** the stock WSL2 kernel has historically not included the `vcan` module. Check early, during M0, with `sudo modprobe vcan`. If it fails, either build a custom WSL2 kernel with `CONFIG_CAN=m`, `CONFIG_CAN_RAW=m`, and `CONFIG_CAN_VCAN=m`, or run M7 in a full Ubuntu VM (Hyper-V or VirtualBox). Everything before M7 works in plain WSL2.
+- **vcan (M7):** confirmed unavailable on the dev machine (2026-10-07). The stock kernel `6.6.87.2-microsoft-standard-WSL2` has `CONFIG_CAN=m` and `CONFIG_CAN_RAW=m` but `# CONFIG_CAN_VCAN is not set` (check with `zcat /proc/config.gz | grep CONFIG_CAN`). Before M7, either build a custom WSL2 kernel with `CONFIG_CAN_VCAN=m` added, or run M7 in a full Ubuntu VM (Hyper-V or VirtualBox). Record the choice in `docs/design-decisions.md`. Everything before M7 works in plain WSL2.
+- **Memory:** the WSL2 VM has much less RAM than CPU cores (7 GB vs 24 cores on the dev machine), so cap build parallelism (`cmake --build <dir> -j 8`) or raise `memory=` in `%UserProfile%\.wslconfig`. Sanitizer builds need the most memory.
 - **Benchmarks:** WSL2 is a lightweight VM, so you can't control the CPU governor, and thread pinning is less meaningful. Benchmarks are still valid for relative comparisons (ring vs mutex, padding vs none). Note "WSL2 on Windows, <CPU model>" in `docs/benchmarks.md`, and treat absolute latency numbers as environment-specific.
 - **Networking:** sender and receiver both run inside WSL2 over loopback, which avoids Windows firewall and port-forwarding issues.
 
@@ -331,7 +368,7 @@ tstream/
 │   ├── bench_spsc.cpp
 │   ├── bench_encode.cpp
 │   └── bench_e2e.cpp
-├── configs/  (default.json, stress.json, faults.json)
+├── configs/  (default.json, bench.json, stress.json, faults.json)
 └── .github/workflows/ci.yml
 ```
 
@@ -342,7 +379,7 @@ tstream/
 | Unit | Each class in isolation | Ring semantics, framing encode/decode, config validation, each monitor's logic driven with synthetic timestamps |
 | Mock-based | Pipeline with fake sources and transport (GMock) | Batch flushes on size and on timeout; health events are injected in order |
 | Stress | Concurrency correctness | 100M-item SPSC ordering test; all sources at max rate for 60 s with no crash or leak |
-| Integration | Real processes over loopback TCP | Sender + receiver run 10 s with zero seq gaps under normal load; graceful shutdown flushes the final batch; receiver restart triggers reconnect |
+| Integration | Real processes over loopback TCP | Sender + receiver run 10 s with zero seq gaps under normal load; graceful shutdown flushes the final batch; receiver restart triggers reconnect; under forced drops, the gaps the receiver sees for each source equal the sender's drop counters for that source (drop accounting reconciles; the test removes the forced backpressure before shutdown so trailing drops are followed by a delivered sample) |
 | Fault injection | Each fault in §8 | `stall` → stale event; `slow_consumer` → drop counters increase and the sender stays alive |
 | Allocation | §9 test | Zero allocations in steady state |
 | Fuzz (optional) | Frame decoder | libFuzzer target on `framing::decode` |
@@ -360,8 +397,8 @@ Benchmarks:
 
 Indicative targets (validate and adjust once measured — publish the real numbers, not these):
 - SPSC throughput clearly above both mutex baselines, with the gap explained.
-- Loopback end-to-end p99 under 1 ms at 10k samples/sec with `max_delay_us` ≤ 500.
-- Zero drops at the default config for a 10-minute run.
+- Loopback end-to-end p99 under 1 ms at 10k samples/sec with `configs/bench.json` (`max_delay_us` ≤ 500). The default config's `max_delay_us` of 2000 alone exceeds this target.
+- Zero drops with `configs/default.json` for a 10-minute run.
 
 ## 15. Milestones
 
@@ -369,7 +406,9 @@ Each milestone is a separate, reviewable chunk of work with acceptance criteria.
 
 **M0 — Skeleton and CI**
 - CMake project, presets, dependency setup, clang-format/tidy, empty test target, CI workflow running all configurations.
-- Local WSL2 environment set up per §11.1, including a one-time `sudo modprobe vcan` check, with the result noted in `docs/design-decisions.md`.
+- Local WSL2 environment set up per §11.1. The vcan check is already done (unavailable, §11.1).
+- Create `docs/design-decisions.md` with the first ADRs: apt-only dependencies, vcan unavailable on WSL2 (M7 needs a custom kernel or VM), the `kCacheLine` constant instead of `hardware_destructive_interference_size`, no `drop_oldest`, and the arena-based encoder plan.
+- CI workflow includes the TSan `vm.mmap_rnd_bits` workaround (§11).
 - ✅ CI is green on gcc and clang across debug, asan, and tsan.
 
 **M1 — SPSC ring buffer**
@@ -440,4 +479,5 @@ Resume bullet templates — fill in real numbers after M6 and don't invent any:
 - Host machine is Windows. All development happens in WSL2 Ubuntu (see §11.1). M7 may need a custom WSL2 kernel or a Linux VM for `vcan`.
 - No physical board. Everything is simulated or emulated by design.
 - Timeline and weekly hours aren't decided yet, so milestones are ordered but not scheduled.
-- Open: JSON vs TOML for config (JSON chosen for familiarity), and whether M8 goes toward shared memory (systems roles) or Zephyr/QEMU (firmware roles).
+- Decided: JSON for config (familiarity; nlohmann/json is already a dependency).
+- Open: whether M8 goes toward shared memory (systems roles) or Zephyr/QEMU (firmware roles).
