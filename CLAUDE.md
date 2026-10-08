@@ -1,5 +1,3 @@
-cd ~/src/telemetry-streamer
-cat > CLAUDE.md <<'EOF'
 # telemetry-streamer
 
 Full specification: docs/SPEC.md. Read it before starting any work.
