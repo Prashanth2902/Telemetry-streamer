@@ -10,4 +10,3 @@ Full specification: docs/SPEC.md. Read it before starting any work.
 - I write SpscRing (M1) and the HealthMonitor interface myself. Review and test them, but don't write the first version.
 - Use `cmake --build <dir> -j 8` (WSL memory is limited).
 - Record design decisions in docs/design-decisions.md.
-EOF
