@@ -207,8 +207,6 @@ Monitors:
 
 Health events are injected into the stream as `Health` samples, so the receiver sees them in order with the data.
 
-Note: this resembles the GM DMS diagnostics work. Implement it fresh with a different design, and don't reuse any proprietary code or structure. In interviews, describe it as a pattern you've applied before.
-
 ## 8. Fault injection
 
 Sources accept runtime faults (from the config or the `--fault` CLI flag) so health monitors and drop policies can be shown working:
