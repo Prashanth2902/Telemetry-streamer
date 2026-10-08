@@ -1,0 +1,11 @@
+build/
+build-*/
+out/
+.cache/
+*.o
+*.a
+*.so
+compile_commands.json
+.vscode/*
+!.vscode/extensions.json
+.idea/
