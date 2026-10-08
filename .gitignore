@@ -9,3 +9,18 @@ compile_commands.json
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Generated protobuf sources (if ever generated into the source tree)
+*.pb.h
+*.pb.cc
+
+# Personal CMake presets
+CMakeUserPresets.json
+
+# Benchmark output and receiver recordings
+bench_results/
+recordings/
+
+# Claude Code local files
+.claude/worktrees/
+.claude/settings.local.json

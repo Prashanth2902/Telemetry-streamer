@@ -259,7 +259,7 @@ Validate at startup: ring capacity must be a power of two, rates must be positiv
   sudo ip link set up vcan0
   ```
 
-(Bazel is a reasonable alternative given GM experience, but CMake is what most embedded/automotive teams and reviewers expect to see.)
+(Bazel is a reasonable alternative, but CMake is what most embedded/automotive teams and reviewers expect to see.)
 
 ### 11.1 Development environment: Windows host
 
