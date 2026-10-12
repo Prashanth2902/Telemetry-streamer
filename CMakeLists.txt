@@ -30,16 +30,8 @@ find_package(nlohmann_json 3.11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Threads REQUIRED)
 
-# Core library. Empty in M0; sources and headers land here from M2 onward.
-add_library(tstream_core INTERFACE)
-add_library(tstream::core ALIAS tstream_core)
-target_include_directories(tstream_core INTERFACE
-  "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_compile_features(tstream_core INTERFACE cxx_std_20)
-target_link_libraries(tstream_core INTERFACE
-  nlohmann_json::nlohmann_json
-  spdlog::spdlog
-  Threads::Threads)
+# Core library (tstream_core) and the tstream executable.
+add_subdirectory(src)
 
 if(TSTREAM_BUILD_TESTS)
   enable_testing()
