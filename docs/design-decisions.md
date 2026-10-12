@@ -174,3 +174,80 @@ ADR-style log. Each entry records the context, the decision, the alternatives co
 - Set `kCacheLine = 128`: makes the name wrong, and every future user of the constant inherits a value chosen for one structure.
 
 **Consequences.** Each ring is about 128 bytes larger (two index groups padded from 64 to 128 B each), which is negligible next to its slots. The cause isn't confirmed: AMD's adjacent-line prefetcher (which fetches lines in 128-byte pairs) is the usual explanation, but 64 B also loses on SMT siblings, which share an L1. Re-measure on bare-metal Linux with hardware counters before claiming a mechanism. `bench_spsc` keeps a 64 B variant (`SpscPad64`) so the comparison stays reproducible.
+
+---
+
+## ADR-011: Runtime ring capacity through a SampleRing interface
+
+**Status:** Accepted (M2, 2026-10-12)
+
+**Context.** `SpscRing<T, Capacity>` fixes capacity at compile time (SPEC §5), but each source's `ring_capacity` comes from the config file at startup.
+
+**Decision.** `SampleRing` is a small abstract interface (`try_push`, `try_pop_bulk`, `size_approx`, `capacity`). `make_sample_ring(capacity)` returns a `SampleRingImpl<N>` wrapping `SpscRing<Sample, N>`, chosen by an explicit `switch` over the 13 supported powers of two (16 to 65536). Config validation rejects anything else.
+
+**Alternatives.**
+- A runtime-capacity ring: a second ring implementation to keep correct, and it loses the compile-time mask.
+- `std::variant` of ring types plus `std::visit`: no virtual call, but every call site has to visit, and compile time and code size grow with the number of capacities.
+- Make `Source` and `Pipeline` templates on the capacity: can't work, because a pipeline drains rings of different capacities.
+
+**Consequences.** Each push and each bulk pop costs one indirect call. That's a few nanoseconds against a 1 kHz to 100 kHz sample rate, and the pipeline amortizes it over up to 64 samples per bulk pop. There are no locks or allocations, so the hot-path rule (CLAUDE.md) holds. If M6 profiling shows the call matters, `Source` can hold the concrete ring type instead.
+
+---
+
+## ADR-012: Source pacing and prompt stop without locks
+
+**Status:** Accepted (M2, 2026-10-12)
+
+**Context.** Sources run at 1 Hz to 1 kHz+ using `sleep_until` on `steady_clock` (SPEC §3.1). A plain `sleep_until` for a 1 Hz source means `stop()` can take up to a second. The usual fix, a condition variable, puts a mutex on the producer thread.
+
+**Decision.**
+- Absolute schedule: `next += period`, then `sleep_until(next)`, so per-sample timing error doesn't accumulate.
+- If the thread falls more than one full period behind (descheduled, debugger, slow sanitizer build), it resynchronizes to now and counts an overrun, instead of emitting a burst of back-to-back samples.
+- The sleep is split into slices of at most 10 ms (`kStopPollInterval`), and the stop flag is checked between slices.
+- `seq` is assigned when a sample is created, before `try_push` (SPEC §4.1). Until M4 adds policies, a full ring means drop-newest plus a counter.
+
+**Alternatives.**
+- `std::condition_variable_any` with `std::stop_token`: instant stop, but adds a mutex to every source thread.
+- Sleep the full period: simple, but a 1 Hz source takes up to 1 s to stop.
+- Detach threads at shutdown: risks losing the final batch, which SPEC §3.2 forbids.
+
+**Consequences.** Stop latency is at most about 10 ms plus one sample (tested: under 200 ms for a 1 Hz source). A source wakes about 100 times a second even when its rate is 1 Hz, which is negligible. Overruns are counted per source, and the health monitors (M5) can use them.
+
+---
+
+## ADR-013: Pipeline loop, idle strategy, and delivery accounting
+
+**Status:** Accepted (M2, 2026-10-12)
+
+**Context.** The pipeline drains N rings into batches and must bound latency (`max_delay_us`) without starving any source, and shutdown must not lose the final batch (SPEC §3.2).
+
+**Decision.**
+- Round-robin over the rings, starting one ring later each pass, taking at most 64 samples per ring per turn (`kMaxDrainPerRing`).
+- Pop directly into the batch's preallocated free slots.
+- The batch timer starts when the first sample enters an empty batch. A batch flushes when it is full or when `max_delay` has passed.
+- When a pass finds nothing, sleep until the open batch's deadline, but at most 100 µs (`kIdleSleep`). Don't spin.
+- On stop: read the flag, drain until a whole pass finds nothing, flush the partial batch, then exit. Callers stop the sources first.
+- A sample counts as delivered only once the sink has it, credited per ring at flush time, not at drain time. The executable's summary checks `generated == dropped + delivered` per source and exits with code 3 otherwise.
+
+**Alternatives.**
+- Busy-spin when idle: lowest latency, but burns a whole core even when the only source is 1 Hz. Revisit for `configs/bench.json` in M6 if the 100 µs sleep shows up in p99.
+- Count delivery at drain time: simpler, but a batch that is drained and never sent would still count as delivered. A mutation test (removing the final flush) showed the end-to-end accounting check then can't catch the loss.
+
+**Consequences.** In the worst case a batch waits `max_delay` plus one idle sleep; on the dev machine the oldest sample's age at flush was about 2.1 to 2.4 ms with `max_delay_us = 2000`. The stdout sink does blocking stdio on the pipeline thread. It's acceptable for M2 debug output and replaced by the non-blocking TCP transport in M3.
+
+---
+
+## ADR-014: Log with fmt, not spdlog's logger
+
+**Status:** Accepted (M2, 2026-10-12)
+
+**Context.** The `tstream` executable used `spdlog::info` and similar for its startup and shutdown messages. Under clang 21 in C++20 mode, Ubuntu 26.04's spdlog 1.15.3 headers fail to compile against its fmt 10.1.1: `spdlog/logger.h` (the `SPDLOG_LOGGER_CATCH` macro) produces "call to consteval function ... is not a constant expression". A six-line program calling `spdlog::info("value {}", 1)` reproduces it; gcc 15 compiles it. Only `spdlog/spdlog.h` is affected; `spdlog/fmt/fmt.h` (plain fmt) works under both compilers.
+
+**Decision.** The executable logs through a small `log_line(level, format, args...)` helper built on `fmt::print(stderr, ...)`, with compile-time-checked format strings. spdlog stays a dependency, because it is how the project gets fmt (SPEC §11 allows "spdlog (or fmt)").
+
+**Alternatives.**
+- Define `SPDLOG_NO_EXCEPTIONS` to remove the failing macro: the installed spdlog is a prebuilt shared library compiled without it, so header and library would disagree.
+- Build spdlog from source or via vcpkg: contradicts ADR-001 for a logging convenience.
+- gcc-only builds: CI and SPEC §11 require clang.
+
+**Consequences.** Log lines are plain `[tstream] [level] message`, without timestamps or async logging. That's enough for start, stop, and error messages; nothing logs on the hot path. If a later Ubuntu or spdlog update fixes the incompatibility, switching back is a small change in `src/main.cpp`.
