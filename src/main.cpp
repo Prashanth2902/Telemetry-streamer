@@ -15,11 +15,10 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <spdlog/fmt/fmt.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
 
 #include "tstream/clock.hpp"
 #include "tstream/config.hpp"
@@ -31,6 +30,15 @@
 namespace {
 
 using namespace std::chrono_literals;
+
+// Logs go to stderr so stdout carries only batches and the summary. Plain fmt
+// rather than spdlog: Ubuntu 26.04's spdlog 1.15.3 + fmt 10.1.1 headers don't
+// compile under clang 21 in C++20 mode (ADR-014).
+template <typename... Args>
+void log_line(std::string_view level, fmt::format_string<Args...> format, Args&&... args) {
+  fmt::print(stderr, "[tstream] [{}] {}\n", level,
+             fmt::format(format, std::forward<Args>(args)...));
+}
 
 // Set from the signal handler; std::atomic<bool> is lock-free, so storing to
 // it is async-signal-safe.
@@ -77,8 +85,8 @@ std::optional<Options> parse_args(int argc, char** argv) {
 void wait_for_stop(std::optional<double> duration_s) {
   const auto start = tstream::Clock::now();
   while (!g_stop_requested.load(std::memory_order_relaxed)) {
-    if (duration_s && std::chrono::duration<double>(tstream::Clock::now() - start).count() >=
-                          *duration_s) {
+    if (duration_s &&
+        std::chrono::duration<double>(tstream::Clock::now() - start).count() >= *duration_s) {
       return;
     }
     std::this_thread::sleep_for(10ms);
@@ -98,8 +106,8 @@ std::uint64_t print_summary(const std::vector<std::unique_ptr<tstream::Source>>&
     const std::uint64_t lost = counters.generated - counters.dropped - delivered;
     fmt::print(
         "summary source={} type={} generated={} dropped={} delivered={} lost={} overruns={}\n",
-        sources[i]->id(), sources[i]->name(), counters.generated, counters.dropped, delivered,
-        lost, counters.overruns);
+        sources[i]->id(), sources[i]->name(), counters.generated, counters.dropped, delivered, lost,
+        counters.overruns);
     total_generated += counters.generated;
     total_dropped += counters.dropped;
     total_delivered += delivered;
@@ -119,8 +127,8 @@ int run(const Options& options) {
   std::vector<tstream::SampleRing*> ring_ptrs;
   for (const auto& source_config : config.sources) {
     if (source_config.policy != tstream::BackpressurePolicy::DropNewest) {
-      spdlog::warn("source {}: policy {} is enforced from M4; using drop_newest for now",
-                   source_config.id, tstream::policy_name(source_config.policy));
+      log_line("warn", "source {}: policy {} is enforced from M4; using drop_newest for now",
+               source_config.id, tstream::policy_name(source_config.policy));
     }
     rings.push_back(tstream::make_sample_ring(source_config.ring_capacity));
     ring_ptrs.push_back(rings.back().get());
@@ -130,8 +138,8 @@ int run(const Options& options) {
   tstream::StdoutSink sink;
   tstream::Pipeline pipeline(ring_ptrs, config.batch, sink);
 
-  spdlog::info("starting {} sources (batch max_samples={} max_delay_us={})", sources.size(),
-               config.batch.max_samples, config.batch.max_delay_us);
+  log_line("info", "starting {} sources (batch max_samples={} max_delay_us={})", sources.size(),
+           config.batch.max_samples, config.batch.max_delay_us);
   pipeline.start();
   for (auto& source : sources) {
     source->start();
@@ -141,7 +149,7 @@ int run(const Options& options) {
 
   // Shutdown order (SPEC §3.2): stop producing, then drain and flush, then
   // close the sink.
-  spdlog::info("stopping");
+  log_line("info", "stopping");
   for (auto& source : sources) {
     source->stop();
   }
@@ -150,22 +158,19 @@ int run(const Options& options) {
 
   const std::uint64_t lost = print_summary(sources, pipeline);
   if (lost != 0) {
-    spdlog::error("{} samples unaccounted for", lost);
+    log_line("error", "{} samples unaccounted for", lost);
     return 3;
   }
-  spdlog::info("stopped cleanly");
+  log_line("info", "stopped cleanly");
   return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  // Logs go to stderr so stdout carries only batches and the summary.
-  spdlog::set_default_logger(spdlog::stderr_color_mt("tstream"));
-
   const auto options = parse_args(argc, argv);
   if (!options) {
-    std::fputs(kUsage.data(), stderr);
+    std::fwrite(kUsage.data(), 1, kUsage.size(), stderr);
     return 1;
   }
 
@@ -175,10 +180,10 @@ int main(int argc, char** argv) {
   try {
     return run(*options);
   } catch (const tstream::ConfigError& e) {
-    spdlog::error("config error: {}", e.what());
+    log_line("error", "config error: {}", e.what());
     return 2;
   } catch (const std::exception& e) {
-    spdlog::error("fatal: {}", e.what());
+    log_line("error", "fatal: {}", e.what());
     return 1;
   }
 }
