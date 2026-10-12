@@ -222,20 +222,21 @@ TEST(SpscRingTypes, WorksWithScalarTypes) {
 // assert if a different thread does so later. Release and RelWithDebInfo
 // builds (including the tsan presets) compile the check out.
 #ifndef NDEBUG
+// Results are discarded on purpose: only the second thread's call matters.
 void push_from_two_threads() {
   SpscRing<int, 8> ring;
-  ring.try_push(1);
-  std::thread other([&] { ring.try_push(2); });
+  static_cast<void>(ring.try_push(1));
+  std::thread other([&] { static_cast<void>(ring.try_push(2)); });
   other.join();
 }
 
 void pop_from_two_threads() {
   SpscRing<int, 8> ring;
-  ring.try_push(1);
-  ring.try_push(2);
+  static_cast<void>(ring.try_push(1));
+  static_cast<void>(ring.try_push(2));
   int out = 0;
-  ring.try_pop(out);
-  std::thread other([&] { ring.try_pop(out); });
+  static_cast<void>(ring.try_pop(out));
+  std::thread other([&] { static_cast<void>(ring.try_pop(out)); });
   other.join();
 }
 
