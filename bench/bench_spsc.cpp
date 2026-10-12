@@ -188,14 +188,15 @@ using SpscNoCache =
 using SpscNoPadding =
     BasicSpscRing<std::uint64_t, kCapacity,
                   SpscRingOptions{.alignment = alignof(std::atomic<std::size_t>)}>;
-using SpscPad128 = BasicSpscRing<std::uint64_t, kCapacity, SpscRingOptions{.alignment = 128}>;
+using SpscPad64 =
+    BasicSpscRing<std::uint64_t, kCapacity, SpscRingOptions{.alignment = tstream::kCacheLine}>;
 
 BENCHMARK_TEMPLATE(BM_Throughput, SpscNoCache)->UseRealTime();
 BENCHMARK_TEMPLATE(BM_Throughput, SpscNoPadding)->UseRealTime();
-BENCHMARK_TEMPLATE(BM_Throughput, SpscPad128)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, SpscPad64)->UseRealTime();
 
 BENCHMARK_TEMPLATE(BM_PingPong, SpscNoCache)->UseRealTime();
 BENCHMARK_TEMPLATE(BM_PingPong, SpscNoPadding)->UseRealTime();
-BENCHMARK_TEMPLATE(BM_PingPong, SpscPad128)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_PingPong, SpscPad64)->UseRealTime();
 
 }  // namespace

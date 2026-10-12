@@ -177,7 +177,8 @@ TEST(SpscRingStress, BulkPop) {
 using NoCachedIndices = BasicSpscRing<std::uint64_t, 16, SpscRingOptions{.cache_indices = false}>;
 using NoPadding = BasicSpscRing<std::uint64_t, 16,
                                 SpscRingOptions{.alignment = alignof(std::atomic<std::size_t>)}>;
-using Padded128 = BasicSpscRing<std::uint64_t, 16, SpscRingOptions{.alignment = 128}>;
+using Padded64 =
+    BasicSpscRing<std::uint64_t, 16, SpscRingOptions{.alignment = tstream::kCacheLine}>;
 
 TEST(SpscRingStress, VariantWithoutCachedIndices) {
   run_single_pop<NoCachedIndices>(stress_count() / 10);
@@ -189,9 +190,9 @@ TEST(SpscRingStress, VariantWithoutPadding) {
   run_bulk_pop<NoPadding, 7>(stress_count() / 10);
 }
 
-TEST(SpscRingStress, VariantPaddedTo128) {
-  run_single_pop<Padded128>(stress_count() / 10);
-  run_bulk_pop<Padded128, 7>(stress_count() / 10);
+TEST(SpscRingStress, VariantPaddedTo64) {
+  run_single_pop<Padded64>(stress_count() / 10);
+  run_bulk_pop<Padded64, 7>(stress_count() / 10);
 }
 
 }  // namespace

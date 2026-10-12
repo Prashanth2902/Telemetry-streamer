@@ -41,10 +41,11 @@ namespace tstream {
 struct SpscRingOptions {
   // Keep a private copy of the other side's index (see file comment).
   bool cache_indices = true;
-  // Alignment of each side's index group and of the slot storage.
-  // kCacheLine keeps producer and consumer data on separate cache lines.
-  // alignof(std::atomic<std::size_t>) packs them together (false sharing).
-  std::size_t alignment = kCacheLine;
+  // Alignment of each side's index group and of the slot storage. Two cache
+  // lines, not one: measured ~45% higher throughput than kCacheLine on the dev
+  // machine (docs/design-decisions.md ADR-010). kCacheLine still separates the
+  // sides; alignof(std::atomic<std::size_t>) packs them together (false sharing).
+  std::size_t alignment = 2 * kCacheLine;
 };
 
 template <typename T, std::size_t Capacity, SpscRingOptions Options = SpscRingOptions{}>
@@ -189,7 +190,7 @@ class BasicSpscRing {
   alignas(Options.alignment) std::array<T, Capacity> slots_{};
 };
 
-// The production configuration: cached indices, cache-line separated sides.
+// The production configuration: cached indices, sides 128 bytes apart.
 template <typename T, std::size_t Capacity>
 using SpscRing = BasicSpscRing<T, Capacity>;
 
