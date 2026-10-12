@@ -38,7 +38,7 @@ ADR-style log. Each entry records the context, the decision, the alternatives co
 
 ## ADR-003: Fixed `kCacheLine = 64` instead of `std::hardware_destructive_interference_size`
 
-**Status:** Accepted (M0, 2026-10-12)
+**Status:** Accepted (M0, 2026-10-12). Amended by ADR-010: the ring now aligns its sides to `2 * kCacheLine`; `kCacheLine` stays 64.
 
 **Context.** `SpscRing` keeps `head_` and `tail_` on separate cache lines to avoid false sharing. The standard constant seems like the natural choice, but GCC treats it as ABI-unstable: it emits `-Winterference-size` when the constant is used in a header, and that fails the build under `-Werror`. Its value can also differ between compilers and `-mtune` settings.
 
@@ -144,7 +144,7 @@ ADR-style log. Each entry records the context, the decision, the alternatives co
 **Context.** SPEC §5 fixes the API as `SpscRing<T, Capacity>`, but §14.1 benchmarks variants: with and without cached indices, with and without padding, and 64 vs 128 alignment. The variants have to be the same code with one knob changed, or the comparison means nothing. The first implementation was written by Claude at the author's request; the author plans to write their own version later, and the existing tests and benchmarks are the bar it has to pass.
 
 **Decision.**
-- `BasicSpscRing<T, Capacity, SpscRingOptions>` holds the implementation. `SpscRing<T, Capacity>` is an alias for the default options (cached indices, `kCacheLine` alignment).
+- `BasicSpscRing<T, Capacity, SpscRingOptions>` holds the implementation. `SpscRing<T, Capacity>` is an alias for the default options (cached indices, `2 * kCacheLine` alignment, see ADR-010).
 - Each side's shared index sits in one aligned group with that side's private data: producer `{tail, cached_head}`, consumer `{head, cached_tail}`. In steady state each thread writes only its own cache line; the other side's line is read only when the cached copy says full or empty.
 - Monotonic `size_t` counters with masking, so all `Capacity` slots are usable.
 - `try_pop_bulk` copies in at most two contiguous pieces and publishes `head` once per batch.
@@ -156,3 +156,21 @@ ADR-style log. Each entry records the context, the decision, the alternatives co
 - Sacrificing one slot to tell full from empty: wastes capacity; monotonic counters make it unnecessary.
 
 **Consequences.** Variants are stress-tested as well as benchmarked, so a variant with a correctness bug can't produce numbers. A rewrite by the author only needs to keep `BasicSpscRing`/`SpscRingOptions` (or adjust the variant aliases in `bench/bench_spsc.cpp` and the stress test).
+
+---
+
+## ADR-010: Align SpscRing sides to 128 bytes
+
+**Status:** Accepted (M1, 2026-10-12). Amends ADR-003.
+
+**Context.** ADR-003 fixed `kCacheLine = 64` and said to change it if M1 benchmarks showed 128 meaningfully faster. On the dev machine (Ryzen 9 7845HX, WSL2), `bench_spsc` measured:
+- Throughput: 126–136 M items/s with 128 B alignment vs 81–92 M items/s with 64 B, in every thread placement and in three separate runs (CV 1.6% for 128 B over 10 repetitions).
+- Round trip: 335–370 ns vs 340–354 ns, equal within noise.
+
+**Decision.** `SpscRingOptions::alignment` defaults to `2 * kCacheLine`. `kCacheLine` stays 64, because that is the actual cache-line size; the ring separates its sides by two lines.
+
+**Alternatives.**
+- Keep 64 B: ~35% less throughput for 128 bytes less memory per ring.
+- Set `kCacheLine = 128`: makes the name wrong, and every future user of the constant inherits a value chosen for one structure.
+
+**Consequences.** Each ring is about 128 bytes larger (two index groups padded from 64 to 128 B each), which is negligible next to its slots. The cause isn't confirmed: AMD's adjacent-line prefetcher (which fetches lines in 128-byte pairs) is the usual explanation, but 64 B also loses on SMT siblings, which share an L1. Re-measure on bare-metal Linux with hardware counters before claiming a mechanism. `bench_spsc` keeps a 64 B variant (`SpscPad64`) so the comparison stays reproducible.
