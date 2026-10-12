@@ -2,11 +2,6 @@
 // Each test spawns the real binary, so sanitizer presets check the whole
 // program, including shutdown.
 
-#include <fcntl.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -19,9 +14,13 @@
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 extern char** environ;
 
@@ -86,6 +85,7 @@ class CliTest : public ::testing::Test {
     std::vector<std::string> storage{kBinary.string()};
     storage.insert(storage.end(), args.begin(), args.end());
     std::vector<char*> argv;
+    argv.reserve(storage.size() + 1);
     for (auto& s : storage) {
       argv.push_back(s.data());
     }
@@ -127,6 +127,7 @@ class CliTest : public ::testing::Test {
 };
 
 struct Totals {
+  bool found = false;  // false if stdout had no summary line
   std::uint64_t generated = 0;
   std::uint64_t dropped = 0;
   std::uint64_t delivered = 0;
@@ -134,15 +135,19 @@ struct Totals {
   std::uint64_t batches = 0;
 };
 
-std::optional<Totals> parse_totals(const std::string& out) {
+Totals parse_totals(const std::string& out) {
   static const std::regex kTotal(
       R"(summary total generated=(\d+) dropped=(\d+) delivered=(\d+) lost=(\d+) batches=(\d+))");
   std::smatch m;
   if (!std::regex_search(out, m, kTotal)) {
-    return std::nullopt;
+    return {};
   }
-  return Totals{std::stoull(m[1]), std::stoull(m[2]), std::stoull(m[3]), std::stoull(m[4]),
-                std::stoull(m[5])};
+  return {.found = true,
+          .generated = std::stoull(m[1]),
+          .dropped = std::stoull(m[2]),
+          .delivered = std::stoull(m[3]),
+          .lost = std::stoull(m[4]),
+          .batches = std::stoull(m[5])};
 }
 
 // Sum of "batch N: M samples" lines, and how many there were.
@@ -165,13 +170,13 @@ std::pair<std::uint64_t, std::uint64_t> sum_batch_lines(const std::string& out) 
 void expect_clean_shutdown(const RunResult& r) {
   EXPECT_EQ(r.exit_code, 0) << r.err;
   const auto totals = parse_totals(r.out);
-  ASSERT_TRUE(totals.has_value()) << "no summary line in stdout:\n" << r.out;
-  EXPECT_EQ(totals->lost, 0U);
-  EXPECT_EQ(totals->generated, totals->dropped + totals->delivered);
+  ASSERT_TRUE(totals.found) << "no summary line in stdout:\n" << r.out;
+  EXPECT_EQ(totals.lost, 0U);
+  EXPECT_EQ(totals.generated, totals.dropped + totals.delivered);
   // Every delivered sample appears in a printed batch, and vice versa.
   const auto [batch_samples, batch_lines] = sum_batch_lines(r.out);
-  EXPECT_EQ(batch_samples, totals->delivered);
-  EXPECT_EQ(batch_lines, totals->batches);
+  EXPECT_EQ(batch_samples, totals.delivered);
+  EXPECT_EQ(batch_lines, totals.batches);
   EXPECT_THAT(r.err, HasSubstr("stopped cleanly"));
 }
 
@@ -180,9 +185,9 @@ TEST_F(CliTest, DefaultConfigRunsForDurationAndPrintsBatches) {
   expect_clean_shutdown(r);
   EXPECT_THAT(r.out, HasSubstr("batch 0: "));
   const auto totals = parse_totals(r.out);
-  ASSERT_TRUE(totals.has_value());
-  EXPECT_EQ(totals->dropped, 0U);  // default config is sized for zero drops
-  EXPECT_GT(totals->delivered, 500U);  // ~1000 from the 1 kHz IMU; slack for sanitizers
+  ASSERT_TRUE(totals.found);
+  EXPECT_EQ(totals.dropped, 0U);      // default config is sized for zero drops
+  EXPECT_GT(totals.delivered, 500U);  // ~1000 from the 1 kHz IMU; slack for sanitizers
 }
 
 TEST_F(CliTest, SigintTriggersGracefulShutdown) {
@@ -204,9 +209,9 @@ TEST_F(CliTest, FinalBatchIsFlushedOnShutdown) {
   const auto r = run({"--config", write_config(config).string(), "--duration", "0.5"});
   expect_clean_shutdown(r);
   const auto totals = parse_totals(r.out);
-  ASSERT_TRUE(totals.has_value());
-  EXPECT_EQ(totals->batches, 1U);
-  EXPECT_GT(totals->delivered, 0U);
+  ASSERT_TRUE(totals.found);
+  EXPECT_EQ(totals.batches, 1U);
+  EXPECT_GT(totals.delivered, 0U);
 }
 
 TEST_F(CliTest, InvalidConfigExitsWithCode2) {
@@ -225,8 +230,12 @@ TEST_F(CliTest, MissingConfigFileExitsWithCode2) {
 }
 
 TEST_F(CliTest, BadArgumentsPrintUsage) {
-  for (const auto& args : std::vector<std::vector<std::string>>{
-           {}, {"--config"}, {"--duration", "1"}, {"--config", "x", "--duration", "-1"}, {"--bogus"}}) {
+  for (const auto& args :
+       std::vector<std::vector<std::string>>{{},
+                                             {"--config"},
+                                             {"--duration", "1"},
+                                             {"--config", "x", "--duration", "-1"},
+                                             {"--bogus"}}) {
     const auto r = run(args);
     EXPECT_EQ(r.exit_code, 1);
     EXPECT_THAT(r.err, HasSubstr("usage: tstream"));

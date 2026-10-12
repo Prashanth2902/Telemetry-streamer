@@ -14,8 +14,7 @@ Clock::duration period_for(double rate_hz) {
   if (!(rate_hz > 0)) {
     throw std::invalid_argument("rate_hz must be positive");
   }
-  return std::chrono::duration_cast<Clock::duration>(
-      std::chrono::duration<double>(1.0 / rate_hz));
+  return std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / rate_hz));
 }
 
 }  // namespace
@@ -29,7 +28,9 @@ FixedRateSource::FixedRateSource(std::uint16_t id, std::string_view name, double
       ring_(ring),
       model_(std::move(model)) {}
 
-FixedRateSource::~FixedRateSource() { stop(); }
+FixedRateSource::~FixedRateSource() {
+  stop();
+}
 
 void FixedRateSource::start() {
   if (thread_.joinable()) {
@@ -47,8 +48,9 @@ void FixedRateSource::stop() {
 }
 
 SourceCounters FixedRateSource::counters() const {
-  return {generated_.load(std::memory_order_relaxed), dropped_.load(std::memory_order_relaxed),
-          overruns_.load(std::memory_order_relaxed)};
+  return {.generated = generated_.load(std::memory_order_relaxed),
+          .dropped = dropped_.load(std::memory_order_relaxed),
+          .overruns = overruns_.load(std::memory_order_relaxed)};
 }
 
 void FixedRateSource::run() {
@@ -107,8 +109,8 @@ std::unique_ptr<Source> make_source(const SourceConfig& config, SampleRing& ring
       model = std::make_unique<SimBatteryModel>(source_seed);
       break;
   }
-  return std::make_unique<FixedRateSource>(config.id, source_type_name(config.type),
-                                           config.rate_hz, ring, std::move(model));
+  return std::make_unique<FixedRateSource>(config.id, source_type_name(config.type), config.rate_hz,
+                                           ring, std::move(model));
 }
 
 }  // namespace tstream

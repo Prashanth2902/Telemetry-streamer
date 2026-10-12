@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -70,16 +69,17 @@ std::vector<Sample> generate(std::uint64_t seed, int count, double rate_hz) {
   return out;
 }
 
-bool same_payload(const Sample& a, const Sample& b) {
-  // Payload bytes only; header fields are set by the source, not the model.
-  return std::memcmp(&a.imu, &b.imu, sizeof(Sample) - offsetof(Sample, imu)) == 0;
+// Member-wise: memcmp would also compare padding bytes.
+bool same_imu(const Sample& a, const Sample& b) {
+  return a.imu.ax == b.imu.ax && a.imu.ay == b.imu.ay && a.imu.az == b.imu.az &&
+         a.imu.gx == b.imu.gx && a.imu.gy == b.imu.gy && a.imu.gz == b.imu.gz;
 }
 
 TEST(SimModels, SameSeedGivesIdenticalSequence) {
   const auto a = generate<SimImuModel>(7, 500, 1000);
   const auto b = generate<SimImuModel>(7, 500, 1000);
   for (std::size_t i = 0; i < a.size(); ++i) {
-    ASSERT_TRUE(same_payload(a[i], b[i])) << "sample " << i;
+    ASSERT_TRUE(same_imu(a[i], b[i])) << "sample " << i;
   }
 }
 
@@ -88,7 +88,7 @@ TEST(SimModels, DifferentSeedsGiveDifferentNoise) {
   const auto b = generate<SimImuModel>(8, 50, 1000);
   int identical = 0;
   for (std::size_t i = 0; i < a.size(); ++i) {
-    identical += same_payload(a[i], b[i]) ? 1 : 0;
+    identical += same_imu(a[i], b[i]) ? 1 : 0;
   }
   EXPECT_EQ(identical, 0);
 }
@@ -116,7 +116,8 @@ TEST(SimModels, GpsMovesNorthEastAtConfiguredSpeed) {
   EXPECT_GT(last.lon, first.lon);
   EXPECT_EQ(last.fix, 3);
   // 150 m in 10 s, north-east: ~106 m north = ~0.00095 degrees of latitude.
-  EXPECT_NEAR(last.lat - SimGpsModel::kStartLat, 150.0 * std::cos(std::numbers::pi / 4) / 111'320.0, 0.0001);
+  EXPECT_NEAR(last.lat - SimGpsModel::kStartLat, 150.0 * std::cos(std::numbers::pi / 4) / 111'320.0,
+              0.0001);
   EXPECT_NEAR(static_cast<double>(last.speed_mps), SimGpsModel::kSpeedMps, 1.0);
 }
 

@@ -17,7 +17,9 @@ Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, Bat
   }
 }
 
-Pipeline::~Pipeline() { stop(); }
+Pipeline::~Pipeline() {
+  stop();
+}
 
 void Pipeline::start() {
   if (thread_.joinable()) {
@@ -37,7 +39,9 @@ std::uint64_t Pipeline::delivered(std::size_t ring_index) const {
   return delivered_[ring_index].load(std::memory_order_relaxed);
 }
 
-std::uint64_t Pipeline::batches() const { return batches_.load(std::memory_order_relaxed); }
+std::uint64_t Pipeline::batches() const {
+  return batches_.load(std::memory_order_relaxed);
+}
 
 void Pipeline::run() {
   std::size_t first_ring = 0;
@@ -96,7 +100,8 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
 }
 
 void Pipeline::flush() {
-  const BatchView view{next_batch_seq_++, now_ns(), batcher_.samples()};
+  const BatchView view{
+      .batch_seq = next_batch_seq_++, .t_flush_ns = now_ns(), .samples = batcher_.samples()};
   sink_.send(view);
   // Credit samples as delivered only once the sink has them, so a batch that
   // is drained but never sent shows up as lost instead of delivered.
