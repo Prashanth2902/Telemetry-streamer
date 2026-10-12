@@ -21,3 +21,5 @@ endfunction()
 
 tstream_add_test(toolchain_smoke_test LABEL unit SOURCES unit/toolchain_smoke_test.cpp)
 tstream_add_test(spsc_ring_test LABEL unit SOURCES unit/spsc_ring_test.cpp)
+tstream_add_test(spsc_ring_stress_test LABEL stress TIMEOUT 600
+  SOURCES stress/spsc_ring_stress_test.cpp)
