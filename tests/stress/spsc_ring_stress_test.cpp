@@ -28,7 +28,9 @@
 
 namespace {
 
+using tstream::BasicSpscRing;
 using tstream::SpscRing;
+using tstream::SpscRingOptions;
 
 std::uint64_t stress_count() {
   if (const char* env = std::getenv("TSTREAM_STRESS_COUNT")) {
@@ -127,9 +129,9 @@ void expect_complete_and_ordered(const ConsumerResult& r, std::uint64_t count) {
   EXPECT_EQ(r.received, count);
 }
 
-template <std::size_t Capacity>
+template <typename Ring>
 void run_single_pop(std::uint64_t count) {
-  SpscRing<std::uint64_t, Capacity> ring;
+  Ring ring;
   Done done;
   ConsumerResult result;
   std::thread consumer([&] { result = consume_single(ring, count, done); });
@@ -140,13 +142,12 @@ void run_single_pop(std::uint64_t count) {
   EXPECT_EQ(ring.size_approx(), 0U);
 }
 
-template <std::size_t Capacity, std::size_t BatchSize>
+template <typename Ring, std::size_t BatchSize>
 void run_bulk_pop(std::uint64_t count) {
-  SpscRing<std::uint64_t, Capacity> ring;
+  Ring ring;
   Done done;
   ConsumerResult result;
-  std::thread consumer(
-      [&] { result = consume_bulk<decltype(ring), BatchSize>(ring, count, done); });
+  std::thread consumer([&] { result = consume_bulk<Ring, BatchSize>(ring, count, done); });
   std::thread producer([&] { produce(ring, count, done); });
   producer.join();
   consumer.join();
@@ -157,16 +158,38 @@ void run_bulk_pop(std::uint64_t count) {
 // A tiny ring flips between full and empty constantly, which exercises the
 // cached-index refresh paths on both sides.
 TEST(SpscRingStress, SmallRingSinglePop) {
-  run_single_pop<16>(stress_count());
+  run_single_pop<SpscRing<std::uint64_t, 16>>(stress_count());
 }
 
 TEST(SpscRingStress, LargeRingSinglePop) {
-  run_single_pop<4096>(stress_count());
+  run_single_pop<SpscRing<std::uint64_t, 4096>>(stress_count());
 }
 
 // Batch smaller than capacity, so bulk pops regularly straddle the wrap point.
 TEST(SpscRingStress, BulkPop) {
-  run_bulk_pop<1024, 100>(stress_count());
+  run_bulk_pop<SpscRing<std::uint64_t, 1024>, 100>(stress_count());
+}
+
+// The non-default configurations that bench_spsc measures must be correct
+// too, or their numbers mean nothing. A tenth of the count keeps CI fast.
+using NoCachedIndices = BasicSpscRing<std::uint64_t, 16, SpscRingOptions{.cache_indices = false}>;
+using NoPadding = BasicSpscRing<std::uint64_t, 16,
+                                SpscRingOptions{.alignment = alignof(std::atomic<std::size_t>)}>;
+using Padded128 = BasicSpscRing<std::uint64_t, 16, SpscRingOptions{.alignment = 128}>;
+
+TEST(SpscRingStress, VariantWithoutCachedIndices) {
+  run_single_pop<NoCachedIndices>(stress_count() / 10);
+  run_bulk_pop<NoCachedIndices, 7>(stress_count() / 10);
+}
+
+TEST(SpscRingStress, VariantWithoutPadding) {
+  run_single_pop<NoPadding>(stress_count() / 10);
+  run_bulk_pop<NoPadding, 7>(stress_count() / 10);
+}
+
+TEST(SpscRingStress, VariantPaddedTo128) {
+  run_single_pop<Padded128>(stress_count() / 10);
+  run_bulk_pop<Padded128, 7>(stress_count() / 10);
 }
 
 }  // namespace
