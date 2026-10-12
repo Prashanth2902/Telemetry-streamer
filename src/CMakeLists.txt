@@ -15,3 +15,7 @@ target_link_libraries(tstream_core PUBLIC
   nlohmann_json::nlohmann_json
   spdlog::spdlog)
 tstream_set_warnings(tstream_core)
+
+add_executable(tstream main.cpp)
+target_link_libraries(tstream PRIVATE tstream::core)
+tstream_set_warnings(tstream)

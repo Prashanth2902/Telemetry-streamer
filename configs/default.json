@@ -1,0 +1,12 @@
+{
+  "sources": [
+    { "id": 1, "type": "sim_imu",     "rate_hz": 1000, "ring_capacity": 4096, "policy": "drop_newest" },
+    { "id": 2, "type": "sim_gps",     "rate_hz": 10,   "ring_capacity": 256,  "policy": "block_with_timeout", "timeout_us": 500 },
+    { "id": 3, "type": "sim_battery", "rate_hz": 1,    "ring_capacity": 64,   "policy": "block_with_timeout", "timeout_us": 500,
+      "health": { "stale_ms": 5000 } }
+  ],
+  "batch": { "max_samples": 256, "max_delay_us": 2000 },
+  "transport": { "host": "127.0.0.1", "port": 9000, "max_pending_batches": 64, "max_frame_bytes": 1048576 },
+  "health": { "stale_periods": 3, "stale_min_ms": 20, "rate_tolerance_pct": 20, "rate_window_ms": 1000, "rate_min_samples": 10 },
+  "seed": 42
+}
