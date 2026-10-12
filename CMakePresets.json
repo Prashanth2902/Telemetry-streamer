@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "TSTREAM_BUILD_TESTS": "ON",
+        "TSTREAM_BUILD_BENCH": "OFF",
+        "TSTREAM_SANITIZER": "none"
+      }
+    },
+    { "name": "gcc",   "hidden": true, "cacheVariables": { "CMAKE_CXX_COMPILER": "g++" } },
+    { "name": "clang", "hidden": true, "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++" } },
+
+    { "name": "cfg-debug",   "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "cfg-release", "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "TSTREAM_BUILD_BENCH": "ON" } },
+    { "name": "cfg-asan",    "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "TSTREAM_SANITIZER": "address" } },
+    { "name": "cfg-tsan",    "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "TSTREAM_SANITIZER": "thread" } },
+
+    { "name": "debug",         "displayName": "gcc Debug",               "inherits": ["cfg-debug", "gcc", "base"] },
+    { "name": "release",       "displayName": "gcc Release + benchmarks", "inherits": ["cfg-release", "gcc", "base"] },
+    { "name": "asan",          "displayName": "gcc ASan + UBSan",         "inherits": ["cfg-asan", "gcc", "base"] },
+    { "name": "tsan",          "displayName": "gcc ThreadSanitizer",      "inherits": ["cfg-tsan", "gcc", "base"] },
+    { "name": "clang-debug",   "displayName": "clang Debug",               "inherits": ["cfg-debug", "clang", "base"] },
+    { "name": "clang-release", "displayName": "clang Release + benchmarks", "inherits": ["cfg-release", "clang", "base"] },
+    { "name": "clang-asan",    "displayName": "clang ASan + UBSan",         "inherits": ["cfg-asan", "clang", "base"] },
+    { "name": "clang-tsan",    "displayName": "clang ThreadSanitizer",      "inherits": ["cfg-tsan", "clang", "base"] }
+  ],
+  "buildPresets": [
+    { "name": "debug",         "configurePreset": "debug",         "jobs": 8 },
+    { "name": "release",       "configurePreset": "release",       "jobs": 8 },
+    { "name": "asan",          "configurePreset": "asan",          "jobs": 8 },
+    { "name": "tsan",          "configurePreset": "tsan",          "jobs": 8 },
+    { "name": "clang-debug",   "configurePreset": "clang-debug",   "jobs": 8 },
+    { "name": "clang-release", "configurePreset": "clang-release", "jobs": 8 },
+    { "name": "clang-asan",    "configurePreset": "clang-asan",    "jobs": 8 },
+    { "name": "clang-tsan",    "configurePreset": "clang-tsan",    "jobs": 8 }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" },
+      "environment": { "DEBUGINFOD_URLS": "" }
+    },
+    {
+      "name": "test-asan-env",
+      "hidden": true,
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1:strict_string_checks=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "test-tsan-env",
+      "hidden": true,
+      "environment": { "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1" }
+    },
+
+    { "name": "debug",         "configurePreset": "debug",         "inherits": ["test-base"] },
+    { "name": "release",       "configurePreset": "release",       "inherits": ["test-base"] },
+    { "name": "asan",          "configurePreset": "asan",          "inherits": ["test-base", "test-asan-env"] },
+    { "name": "tsan",          "configurePreset": "tsan",          "inherits": ["test-base", "test-tsan-env"] },
+    { "name": "clang-debug",   "configurePreset": "clang-debug",   "inherits": ["test-base"] },
+    { "name": "clang-release", "configurePreset": "clang-release", "inherits": ["test-base"] },
+    { "name": "clang-asan",    "configurePreset": "clang-asan",    "inherits": ["test-base", "test-asan-env"] },
+    { "name": "clang-tsan",    "configurePreset": "clang-tsan",    "inherits": ["test-base", "test-tsan-env"] }
+  ]
+}

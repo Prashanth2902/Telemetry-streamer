@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same package list as SPEC §11.1, so CI matches the dev environment.
+  APT_PACKAGES: >-
+    build-essential clang clang-tidy clang-format cmake ninja-build gdb
+    libprotobuf-dev protobuf-compiler libgtest-dev libgmock-dev libbenchmark-dev
+    nlohmann-json3-dev libspdlog-dev can-utils
+
+jobs:
+  build-test:
+    name: ${{ matrix.compiler }} / ${{ matrix.config }}
+    # Ubuntu 26.04 matches the dev environment (public preview as of 2026-10).
+    # Fallback if the preview misbehaves: ubuntu-24.04, see docs/design-decisions.md ADR-007.
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        config: [debug, asan, tsan]
+        include:
+          - compiler: gcc
+            prefix: ""
+          - compiler: clang
+            prefix: "clang-"
+    env:
+      PRESET: ${{ matrix.prefix }}${{ matrix.config }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
+
+      - name: Show toolchain
+        run: |
+          g++ --version | head -1
+          clang++ --version | head -1
+          cmake --version | head -1
+
+      # High ASLR entropy makes TSan abort at startup on recent kernels (SPEC §11).
+      - name: Lower ASLR entropy for TSan
+        if: matrix.config == 'tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure
+        run: cmake --preset "$PRESET" -DTSTREAM_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build --preset "$PRESET"
+
+      - name: Test
+        run: ctest --preset "$PRESET"
+
+  release-bench:
+    name: gcc / release + benchmark smoke
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
+
+      - name: Configure
+        run: cmake --preset release -DTSTREAM_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Test
+        run: ctest --preset release
+
+      # Smoke run only: proves benchmarks build and execute. Shared CI runners
+      # are too noisy for real numbers; those go in docs/benchmarks.md.
+      - name: Benchmark smoke run
+        run: |
+          for bench in build/release/bench/bench_*; do
+            echo "::group::$bench"
+            "$bench" --benchmark_min_time=0.05s
+            echo "::endgroup::"
+          done
+
+  lint:
+    name: clang-format / clang-tidy
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
+
+      - name: clang-format
+        run: |
+          git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' \
+            | xargs --no-run-if-empty clang-format --dry-run --Werror
+
+      # Build first so generated sources (Protobuf, from M3) exist for clang-tidy.
+      - name: Configure and build (compile_commands.json)
+        run: |
+          cmake --preset clang-debug -DTSTREAM_BUILD_BENCH=ON
+          cmake --build --preset clang-debug
+
+      - name: clang-tidy
+        run: run-clang-tidy -p build/clang-debug -quiet '/(src|tests|bench|tools)/'
