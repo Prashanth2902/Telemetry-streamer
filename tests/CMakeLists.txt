@@ -26,3 +26,4 @@ tstream_add_test(spsc_ring_stress_test LABEL stress TIMEOUT 600
 tstream_add_test(config_test LABEL unit SOURCES unit/config_test.cpp)
 tstream_add_test(sources_test LABEL unit SOURCES unit/sources_test.cpp)
 tstream_add_test(batcher_test LABEL unit SOURCES unit/batcher_test.cpp)
+tstream_add_test(pipeline_test LABEL unit SOURCES unit/pipeline_test.cpp)
