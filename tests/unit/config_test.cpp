@@ -1,12 +1,12 @@
 // Config parsing and validation (SPEC §10).
 
+#include "tstream/config.hpp"
+
 #include <string>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-
-#include "tstream/config.hpp"
 
 namespace {
 
@@ -82,7 +82,9 @@ TEST(Config, HealthBlockIsOptional) {
   EXPECT_DOUBLE_EQ(config.health.rate_window_ms, 1000);
 }
 
-TEST(Config, RejectsInvalidJson) { EXPECT_THROW(parse_config("{ not json"), ConfigError); }
+TEST(Config, RejectsInvalidJson) {
+  EXPECT_THROW(parse_config("{ not json"), ConfigError);
+}
 
 TEST(Config, RejectsNonPowerOfTwoRingCapacity) {
   auto j = example();

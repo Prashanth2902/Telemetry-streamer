@@ -1,11 +1,11 @@
 // Batcher flush rules with synthetic timestamps (no threads, no sleeps).
 
+#include "tstream/batcher.hpp"
+
 #include <cstdint>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
-
-#include "tstream/batcher.hpp"
 
 namespace {
 
@@ -76,6 +76,8 @@ TEST(Batcher, CommitOfZeroDoesNotStartTimer) {
   EXPECT_FALSE(b.due(10 * kDelayNs + 1));
 }
 
-TEST(Batcher, RejectsZeroCapacity) { EXPECT_THROW(Batcher(0, kDelayNs), std::invalid_argument); }
+TEST(Batcher, RejectsZeroCapacity) {
+  EXPECT_THROW(Batcher(0, kDelayNs), std::invalid_argument);
+}
 
 }  // namespace

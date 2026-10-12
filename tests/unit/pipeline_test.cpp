@@ -1,5 +1,7 @@
 // Pipeline with fake producers and a fake/mock sink (SPEC §13 "Mock-based").
 
+#include "tstream/pipeline.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -12,7 +14,6 @@
 #include <gtest/gtest.h>
 
 #include "tstream/clock.hpp"
-#include "tstream/pipeline.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
 
@@ -39,7 +40,8 @@ class RecordingSink final : public tstream::BatchSink {
   };
 
   void send(const BatchView& batch) override {
-    batches.push_back({batch.batch_seq, batch.t_flush_ns, {batch.samples.begin(), batch.samples.end()}});
+    batches.push_back(
+        {batch.batch_seq, batch.t_flush_ns, {batch.samples.begin(), batch.samples.end()}});
     count.fetch_add(1, std::memory_order_release);
   }
 

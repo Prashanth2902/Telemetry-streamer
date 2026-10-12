@@ -49,8 +49,8 @@ struct HealthData {
 struct Sample {
   std::uint16_t source_id;
   SampleKind kind;
-  std::uint32_t seq;           // per-source, assigned before try_push (§4.1)
-  std::int64_t t_capture_ns;   // steady_clock at creation
+  std::uint32_t seq;          // per-source, assigned before try_push (§4.1)
+  std::int64_t t_capture_ns;  // steady_clock at creation
   union {
     ImuData imu;
     GpsData gps;

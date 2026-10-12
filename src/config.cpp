@@ -90,7 +90,9 @@ std::string get_string(const json& j, const std::string& where) {
   return j.get<std::string>();
 }
 
-bool is_power_of_two(std::uint64_t n) { return n != 0 && (n & (n - 1)) == 0; }
+bool is_power_of_two(std::uint64_t n) {
+  return n != 0 && (n & (n - 1)) == 0;
+}
 
 SourceType parse_source_type(const std::string& name, const std::string& where) {
   if (name == "sim_imu") {
@@ -137,8 +139,8 @@ SourceConfig parse_source(const json& j, const std::string& where) {
                       {"id", "type", "rate_hz", "ring_capacity", "policy", "timeout_us", "health"});
   SourceConfig s;
   // 0 is reserved for the pipeline's own health samples (SPEC §4.1).
-  s.id = static_cast<std::uint16_t>(
-      get_integer(require_key(j, where, "id"), where + ".id", 1, 65535));
+  s.id =
+      static_cast<std::uint16_t>(get_integer(require_key(j, where, "id"), where + ".id", 1, 65535));
   s.type = parse_source_type(get_string(require_key(j, where, "type"), where + ".type"),
                              where + ".type");
 
@@ -176,8 +178,8 @@ BatchConfig parse_batch(const json& j) {
   BatchConfig b;
   b.max_samples = static_cast<std::size_t>(
       get_integer(require_key(j, where, "max_samples"), where + ".max_samples", 1, 65536));
-  b.max_delay_us = static_cast<std::uint32_t>(get_integer(
-      require_key(j, where, "max_delay_us"), where + ".max_delay_us", 1, 10'000'000));
+  b.max_delay_us = static_cast<std::uint32_t>(
+      get_integer(require_key(j, where, "max_delay_us"), where + ".max_delay_us", 1, 10'000'000));
   return b;
 }
 
@@ -190,8 +192,8 @@ TransportConfig parse_transport(const json& j) {
   if (t.host.empty()) {
     fail(where + ".host", "must not be empty");
   }
-  t.port =
-      static_cast<std::uint16_t>(get_integer(require_key(j, where, "port"), where + ".port", 1, 65535));
+  t.port = static_cast<std::uint16_t>(
+      get_integer(require_key(j, where, "port"), where + ".port", 1, 65535));
   t.max_pending_batches = static_cast<std::size_t>(get_integer(
       require_key(j, where, "max_pending_batches"), where + ".max_pending_batches", 1, 4096));
   if (j.contains("max_frame_bytes")) {

@@ -28,6 +28,8 @@ void StdoutSink::send(const BatchView& batch) {
   std::fwrite(line.data(), 1, std::min(result.size, line.size()), out_);
 }
 
-void StdoutSink::close() { std::fflush(out_); }
+void StdoutSink::close() {
+  std::fflush(out_);
+}
 
 }  // namespace tstream
