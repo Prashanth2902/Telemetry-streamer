@@ -2,7 +2,9 @@
 # executable runs.
 add_library(tstream_core STATIC
   config.cpp
-  sample_ring.cpp)
+  sample_ring.cpp
+  sources/fixed_rate_source.cpp
+  sources/sim_models.cpp)
 add_library(tstream::core ALIAS tstream_core)
 target_include_directories(tstream_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_compile_features(tstream_core PUBLIC cxx_std_20)
