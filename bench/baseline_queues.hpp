@@ -17,7 +17,7 @@ template <typename T, std::size_t Capacity>
 class MutexDequeQueue {
  public:
   bool try_push(const T& value) {
-    const std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (items_.size() == Capacity) {
       return false;
     }
@@ -26,7 +26,7 @@ class MutexDequeQueue {
   }
 
   bool try_pop(T& out) {
-    const std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (items_.empty()) {
       return false;
     }
@@ -46,7 +46,7 @@ template <typename T, std::size_t Capacity>
 class MutexRingQueue {
  public:
   bool try_push(const T& value) {
-    const std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (size_ == Capacity) {
       return false;
     }
@@ -56,7 +56,7 @@ class MutexRingQueue {
   }
 
   bool try_pop(T& out) {
-    const std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (size_ == 0) {
       return false;
     }
