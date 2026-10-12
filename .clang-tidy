@@ -1,0 +1,21 @@
+---
+# Check groups from SPEC §11. Disabled checks are listed with the reason.
+Checks: >
+  -*,
+  bugprone-*,
+  concurrency-*,
+  modernize-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays
+
+# bugprone-easily-swappable-parameters: fires on most (int, int) signatures; too noisy.
+# modernize-use-trailing-return-type:   style preference, not a defect.
+# modernize-avoid-c-arrays:             fixed-size arrays in trivially copyable
+#                                       hot-path structs (CanData::data[8]) are intentional.
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(include|src|tests|bench|tools)/.*'
+FormatStyle: file
+...
