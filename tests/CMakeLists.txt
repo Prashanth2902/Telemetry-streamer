@@ -27,3 +27,9 @@ tstream_add_test(config_test LABEL unit SOURCES unit/config_test.cpp)
 tstream_add_test(sources_test LABEL unit SOURCES unit/sources_test.cpp)
 tstream_add_test(batcher_test LABEL unit SOURCES unit/batcher_test.cpp)
 tstream_add_test(pipeline_test LABEL unit SOURCES unit/pipeline_test.cpp)
+
+tstream_add_test(cli_test LABEL integration TIMEOUT 300 SOURCES integration/cli_test.cpp)
+target_compile_definitions(cli_test PRIVATE
+  TSTREAM_BINARY="$<TARGET_FILE:tstream>"
+  TSTREAM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+add_dependencies(cli_test tstream)
