@@ -10,6 +10,7 @@ Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, Bat
     : rings_(std::move(rings)),
       sink_(sink),
       batcher_(batch.max_samples, std::int64_t{batch.max_delay_us} * 1000),
+      in_open_batch_(rings_.size(), 0),
       delivered_(std::make_unique<std::atomic<std::uint64_t>[]>(rings_.size())) {
   if (rings_.empty()) {
     throw std::invalid_argument("Pipeline needs at least one ring");
@@ -83,12 +84,12 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
         break;
       }
       batcher_.commit(got, now_ns());
+      in_open_batch_[index] += got;
       taken += got;
       if (batcher_.full()) {
         flush();
       }
     }
-    delivered_[index].fetch_add(taken, std::memory_order_relaxed);
     total += taken;
   }
   return total;
@@ -97,6 +98,12 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
 void Pipeline::flush() {
   const BatchView view{next_batch_seq_++, now_ns(), batcher_.samples()};
   sink_.send(view);
+  // Credit samples as delivered only once the sink has them, so a batch that
+  // is drained but never sent shows up as lost instead of delivered.
+  for (std::size_t i = 0; i < rings_.size(); ++i) {
+    delivered_[i].fetch_add(in_open_batch_[i], std::memory_order_relaxed);
+    in_open_batch_[i] = 0;
+  }
   batches_.fetch_add(1, std::memory_order_relaxed);
   batcher_.clear();
 }

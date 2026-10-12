@@ -48,7 +48,8 @@ class Pipeline {
   // Final drain + flush, then join. Safe to call more than once.
   void stop();
 
-  // Samples taken from rings[i] so far. Exact once stop() has returned.
+  // Samples from rings[i] handed to the sink so far. Exact once stop() has
+  // returned.
   [[nodiscard]] std::uint64_t delivered(std::size_t ring_index) const;
   [[nodiscard]] std::uint64_t batches() const;
 
@@ -62,6 +63,9 @@ class Pipeline {
   BatchSink& sink_;
   Batcher batcher_;
   std::uint64_t next_batch_seq_ = 0;
+  // Per ring: samples in the open batch, credited to delivered_ on flush.
+  // Pipeline thread only.
+  std::vector<std::uint64_t> in_open_batch_;
 
   std::unique_ptr<std::atomic<std::uint64_t>[]> delivered_;
   std::atomic<std::uint64_t> batches_{0};
