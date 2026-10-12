@@ -48,7 +48,9 @@ inline void cpu_relax() {
 // Parsed once from TSTREAM_BENCH_CPUS="<producer>,<consumer>".
 std::optional<std::pair<std::size_t, std::size_t>> bench_cpus() {
   static const auto cpus = []() -> std::optional<std::pair<std::size_t, std::size_t>> {
-    const char* env = std::getenv("TSTREAM_BENCH_CPUS");
+    // getenv is only unsafe alongside setenv, which nothing here calls. The
+    // static initializer runs once even if both threads get here together.
+    const char* env = std::getenv("TSTREAM_BENCH_CPUS");  // NOLINT(concurrency-mt-unsafe)
     if (env == nullptr) {
       return std::nullopt;
     }

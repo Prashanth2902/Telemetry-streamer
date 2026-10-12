@@ -33,7 +33,9 @@ using tstream::SpscRing;
 using tstream::SpscRingOptions;
 
 std::uint64_t stress_count() {
-  if (const char* env = std::getenv("TSTREAM_STRESS_COUNT")) {
+  // getenv is only unsafe alongside setenv, which nothing here calls; and this
+  // runs on the test thread before the producer and consumer start.
+  if (const char* env = std::getenv("TSTREAM_STRESS_COUNT")) {  // NOLINT(concurrency-mt-unsafe)
     return std::stoull(env);
   }
 #if defined(TSTREAM_SANITIZED)
