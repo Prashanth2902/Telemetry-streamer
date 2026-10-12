@@ -134,3 +134,25 @@ ADR-style log. Each entry records the context, the decision, the alternatives co
 **Alternatives.** Warnings as global flags would also hit generated Protobuf code (M3) and fail `-Werror` on code we don't control.
 
 **Consequences.** Every new target must call `tstream_set_warnings`. The `tstream_add_test` and `tstream_add_bench` helpers do this already. Generated Protobuf sources (M3) will get their own target without the project warnings.
+
+---
+
+## ADR-009: SpscRing structure and benchmark knobs
+
+**Status:** Accepted (M1, 2026-10-12)
+
+**Context.** SPEC §5 fixes the API as `SpscRing<T, Capacity>`, but §14.1 benchmarks variants: with and without cached indices, with and without padding, and 64 vs 128 alignment. The variants have to be the same code with one knob changed, or the comparison means nothing. The first implementation was written by Claude at the author's request; the author plans to write their own version later, and the existing tests and benchmarks are the bar it has to pass.
+
+**Decision.**
+- `BasicSpscRing<T, Capacity, SpscRingOptions>` holds the implementation. `SpscRing<T, Capacity>` is an alias for the default options (cached indices, `kCacheLine` alignment).
+- Each side's shared index sits in one aligned group with that side's private data: producer `{tail, cached_head}`, consumer `{head, cached_tail}`. In steady state each thread writes only its own cache line; the other side's line is read only when the cached copy says full or empty.
+- Monotonic `size_t` counters with masking, so all `Capacity` slots are usable.
+- `try_pop_bulk` copies in at most two contiguous pieces and publishes `head` once per batch.
+- The debug-only owner check (SPEC §3.2) uses `std::atomic<std::thread::id>`, so the check itself is race-free. In release it is an empty `[[no_unique_address]]` member and takes no space.
+
+**Alternatives.**
+- Separate hand-written variant classes: duplicates the algorithm, and the copies can drift apart.
+- A cache line per field (four lines): the private cached copy is only written by its owner, so sharing a line with that side's index costs nothing.
+- Sacrificing one slot to tell full from empty: wastes capacity; monotonic counters make it unnecessary.
+
+**Consequences.** Variants are stress-tested as well as benchmarked, so a variant with a correctness bug can't produce numbers. A rewrite by the author only needs to keep `BasicSpscRing`/`SpscRingOptions` (or adjust the variant aliases in `bench/bench_spsc.cpp` and the stress test).
