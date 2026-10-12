@@ -30,7 +30,9 @@
 
 namespace {
 
+using tstream::BasicSpscRing;
 using tstream::SpscRing;
+using tstream::SpscRingOptions;
 using tstream::bench::MutexDequeQueue;
 using tstream::bench::MutexRingQueue;
 
@@ -178,9 +180,20 @@ BENCHMARK_TEMPLATE(BM_PingPong, Spsc)->UseRealTime();
 BENCHMARK_TEMPLATE(BM_PingPong, MutexRing)->UseRealTime();
 BENCHMARK_TEMPLATE(BM_PingPong, MutexDeque)->UseRealTime();
 
-// Variants (SPEC §14.1): with/without cached indices, with/without cache-line
-// padding, and 64 vs 128 alignment. These need SpscRing to expose those knobs
-// (its design is the author's call), so they get registered here once it does:
-//   BENCHMARK_TEMPLATE(BM_Throughput, <variant type>)->UseRealTime();
+// Variants (SPEC §14.1). Each changes one knob relative to the default Spsc.
+using SpscNoCache =
+    BasicSpscRing<std::uint64_t, kCapacity, SpscRingOptions{.cache_indices = false}>;
+using SpscNoPadding =
+    BasicSpscRing<std::uint64_t, kCapacity,
+                  SpscRingOptions{.alignment = alignof(std::atomic<std::size_t>)}>;
+using SpscPad128 = BasicSpscRing<std::uint64_t, kCapacity, SpscRingOptions{.alignment = 128}>;
+
+BENCHMARK_TEMPLATE(BM_Throughput, SpscNoCache)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, SpscNoPadding)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_Throughput, SpscPad128)->UseRealTime();
+
+BENCHMARK_TEMPLATE(BM_PingPong, SpscNoCache)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_PingPong, SpscNoPadding)->UseRealTime();
+BENCHMARK_TEMPLATE(BM_PingPong, SpscPad128)->UseRealTime();
 
 }  // namespace
