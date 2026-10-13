@@ -24,3 +24,6 @@ recordings/
 # Claude Code local files
 .claude/worktrees/
 .claude/settings.local.json
+
+# Local-only project docs (spec, ADRs, benchmark notes); not published
+docs/
