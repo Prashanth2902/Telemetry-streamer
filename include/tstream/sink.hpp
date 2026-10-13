@@ -1,5 +1,5 @@
-// Where finished batches go. M2 prints them (StdoutSink); M3 replaces this
-// with Protobuf encoding over TCP behind the same interface.
+// Where finished batches go: TcpTransport (tcp_transport.hpp) sends them to
+// tstream-recv; StdoutSink prints a line per batch for debugging.
 
 #pragma once
 
@@ -42,9 +42,9 @@ class BatchSink {
 // One line per batch: sequence number, size, per-kind counts, and how long
 // the oldest sample waited between capture and flush.
 //
-// Debug output only: stdio writes on the pipeline thread can block, which a
-// real transport must not do (M3). Each line is formatted into a fixed stack
-// buffer, so formatting itself doesn't allocate.
+// Debug output only (`tstream --sink stdout`): stdio writes on the pipeline
+// thread can block, which TcpTransport never does. Each line is formatted into
+// a fixed stack buffer, so formatting itself doesn't allocate.
 class StdoutSink final : public BatchSink {
  public:
   // Writes to `out`: stdout by default, any FILE* in tests.

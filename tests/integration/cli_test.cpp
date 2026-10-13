@@ -17,7 +17,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <unistd.h>
 
 #include "process.hpp"
 
@@ -38,18 +37,8 @@ struct RunResult {
 
 using tstream::testing::read_file;
 
-class CliTest : public ::testing::Test {
+class CliTest : public tstream::testing::TempDirTest {
  protected:
-  // A fresh temporary directory per test.
-  void SetUp() override {
-    const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    dir_ = fs::temp_directory_path() /
-           ("tstream_cli_" + std::string(info->name()) + "_" + std::to_string(::getpid()));
-    fs::create_directories(dir_);
-  }
-  // Removes the test's temporary directory.
-  void TearDown() override { fs::remove_all(dir_); }
-
   // Writes a config into the temp directory and returns its path.
   fs::path write_config(const nlohmann::json& config) {
     const fs::path path = dir_ / "config.json";
@@ -84,8 +73,6 @@ class CliTest : public ::testing::Test {
     result.err = read_file(err_path);
     return result;
   }
-
-  fs::path dir_;
 };
 
 struct Totals {

@@ -5,9 +5,7 @@
 // "recv summary ..." line and one "recv source=..." line per source.
 // Exit codes: 0 ok, 1 usage error, 2 cannot listen.
 
-#include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,18 +21,9 @@
 #include "tstream/framing.hpp"
 #include "tstream/latency_histogram.hpp"
 #include "tstream/receiver.hpp"
+#include "tstream/stop_signal.hpp"
 
 namespace {
-
-// Set from the signal handler; std::atomic<bool> is lock-free, so storing to
-// it is async-signal-safe.
-std::atomic<bool> g_stop_requested{false};
-static_assert(std::atomic<bool>::is_always_lock_free);
-
-// SIGINT/SIGTERM handler: only sets the flag.
-extern "C" void handle_stop_signal(int /*signal*/) {
-  g_stop_requested.store(true, std::memory_order_relaxed);
-}
 
 struct Options {
   tstream::Receiver::Options receiver;
@@ -146,12 +135,12 @@ void print_summary(const tstream::Receiver& receiver) {
         s.frame_errors[i]);
   }
   fmt::print(
-      "recv summary samples={} batches={} gaps={} out_of_order={} batch_seq_gaps={} "
+      "recv summary samples={} batches={} bytes={} gaps={} out_of_order={} batch_seq_gaps={} "
       "frame_errors={} ({} ) decode_errors={} invalid_samples={} connections={} rejected={} "
       "e2e_us {} pipeline_us {}\n",
-      s.samples, s.batches, receiver.seq().total_gaps(), receiver.seq().total_out_of_order(),
-      s.batch_seq_gaps, s.total_frame_errors(), frame_errors, s.decode_errors, s.invalid_samples,
-      s.connections, s.rejected_connections,
+      s.samples, s.batches, s.bytes, receiver.seq().total_gaps(),
+      receiver.seq().total_out_of_order(), s.batch_seq_gaps, s.total_frame_errors(), frame_errors,
+      s.decode_errors, s.invalid_samples, s.connections, s.rejected_connections,
       latency_text(receiver.e2e_latency(), receiver.latency_available()),
       latency_text(receiver.pipeline_latency(), receiver.latency_available()));
   for (const auto& [id, src] : receiver.seq().sources()) {
@@ -170,7 +159,7 @@ void run(tstream::Receiver& receiver, const Options& options) {
   tstream::LatencyHistogram e2e;
   tstream::LatencyHistogram pipeline;
 
-  while (!g_stop_requested.load(std::memory_order_relaxed)) {
+  while (!tstream::stop_requested()) {
     receiver.poll(20);
     const auto now = tstream::Clock::now();
     const double elapsed_s = std::chrono::duration<double>(now - start).count();
@@ -197,8 +186,7 @@ int main(int argc, char** argv) {
     std::fwrite(kUsage.data(), 1, kUsage.size(), stderr);
     return 1;
   }
-  std::signal(SIGINT, handle_stop_signal);
-  std::signal(SIGTERM, handle_stop_signal);
+  tstream::install_stop_signal_handlers();
 
   try {
     tstream::Receiver receiver(options->receiver);

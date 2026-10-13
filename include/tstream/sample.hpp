@@ -1,8 +1,8 @@
 // In-memory sample that flows through the hot path (SPEC §4.1).
 //
 // Trivially copyable on purpose: it is copied by value through SpscRing and
-// into batches, never heap-allocated. The wire format (Protobuf, M3) is
-// separate and built from this at encode time.
+// into batches, never heap-allocated. The wire format (proto/telemetry.proto)
+// is separate; the Encoder builds it from this at send time.
 
 #pragma once
 

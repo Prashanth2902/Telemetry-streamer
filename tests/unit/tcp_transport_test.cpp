@@ -8,9 +8,7 @@
 #include <span>
 #include <stdexcept>
 #include <thread>
-#include <vector>
 
-#include <arpa/inet.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -19,6 +17,7 @@
 
 #include "tstream/framing.hpp"
 
+#include "sockets.hpp"
 #include "telemetry.pb.h"
 
 namespace {
@@ -28,6 +27,7 @@ using tstream::BatchView;
 using tstream::Sample;
 using tstream::SampleKind;
 using tstream::TcpTransport;
+using tstream::testing::free_port;
 
 // A listening socket on 127.0.0.1, standing in for tstream-recv.
 class Listener {
@@ -73,12 +73,6 @@ class Listener {
   int fd_ = -1;
   std::uint16_t port_ = 0;
 };
-
-// An ephemeral port that nothing is listening on (bound, then released).
-std::uint16_t free_port() {
-  const Listener listener;
-  return listener.port();
-}
 
 // Reads from fd until EOF or timeout, then closes it.
 std::vector<std::byte> read_all(int fd, std::chrono::milliseconds timeout = 5000ms) {

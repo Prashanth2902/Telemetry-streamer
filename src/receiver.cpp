@@ -6,15 +6,14 @@
 #include <system_error>
 #include <utility>
 
-#include <arpa/inet.h>
 #include <ifaddrs.h>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "tstream/clock.hpp"
+#include "tstream/net.hpp"
 
 #include "telemetry.pb.h"
 
@@ -93,28 +92,17 @@ std::uint64_t ReceiverStats::total_frame_errors() const {
   return total;
 }
 
-// Binds the first address getaddrinfo returns for bind_host:port.
+// Binds the first address bind_host:port resolves to.
 Receiver::Receiver(Options options)
     : options_(std::move(options)), decoder_(options_.max_frame_bytes), read_buffer_(kReadChunk) {
-  addrinfo hints{};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;
-  addrinfo* results = nullptr;
-  const int rc = ::getaddrinfo(options_.bind_host.c_str(), std::to_string(options_.port).c_str(),
-                               &hints, &results);
-  if (rc != 0 || results == nullptr) {
-    throw std::runtime_error("cannot resolve " + options_.bind_host + ": " + ::gai_strerror(rc));
-  }
-  listen_fd_ = ::socket(results->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  const SocketAddress address = resolve_tcp(options_.bind_host, options_.port, /*passive=*/true);
+  listen_fd_ = ::socket(address.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   const int one = 1;
   if (listen_fd_ >= 0) {
     ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
   }
-  const bool ok = listen_fd_ >= 0 &&
-                  ::bind(listen_fd_, results->ai_addr, results->ai_addrlen) == 0 &&
+  const bool ok = listen_fd_ >= 0 && ::bind(listen_fd_, address.get(), address.length) == 0 &&
                   ::listen(listen_fd_, 4) == 0;
-  ::freeaddrinfo(results);
   if (!ok) {
     const std::string reason = std::system_category().message(errno);
     if (listen_fd_ >= 0) {

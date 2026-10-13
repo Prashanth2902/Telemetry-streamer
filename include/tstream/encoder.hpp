@@ -61,9 +61,6 @@ class Encoder {
   [[nodiscard]] std::span<const std::byte> encode_frame(const BatchView& batch,
                                                         std::int64_t t_send_ns);
 
-  // The batch size this encoder was sized for.
-  [[nodiscard]] std::size_t max_samples() const;
-
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

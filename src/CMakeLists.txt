@@ -5,10 +5,12 @@ add_library(tstream_core STATIC
   encoder.cpp
   framing.cpp
   latency_histogram.cpp
+  net.cpp
   pipeline.cpp
   receiver.cpp
   sample_ring.cpp
   stdout_sink.cpp
+  stop_signal.cpp
   tcp_transport.cpp
   sources/fixed_rate_source.cpp
   sources/sim_models.cpp)
