@@ -7,6 +7,7 @@ add_library(tstream_core STATIC
   pipeline.cpp
   sample_ring.cpp
   stdout_sink.cpp
+  tcp_transport.cpp
   sources/fixed_rate_source.cpp
   sources/sim_models.cpp)
 add_library(tstream::core ALIAS tstream_core)
