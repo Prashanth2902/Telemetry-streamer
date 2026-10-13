@@ -6,7 +6,7 @@ namespace {
 
 // Once this many consumed bytes pile up at the front, move the rest down so
 // the buffer doesn't grow without bound on a long-lived connection.
-constexpr std::size_t kCompactThreshold = 64 * 1024;
+constexpr std::size_t kCompactThreshold = std::size_t{64} * 1024;
 
 // Reads a big-endian u16 from two bytes.
 std::uint16_t load_be16(const std::byte* p) {

@@ -41,7 +41,7 @@ std::uint16_t free_port() {
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+  EXPECT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
   socklen_t len = sizeof(addr);
   ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len);
   ::close(fd);

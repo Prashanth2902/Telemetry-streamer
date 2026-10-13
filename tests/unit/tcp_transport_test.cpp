@@ -83,7 +83,7 @@ std::uint16_t free_port() {
 // Reads from fd until EOF or timeout, then closes it.
 std::vector<std::byte> read_all(int fd, std::chrono::milliseconds timeout = 5000ms) {
   std::vector<std::byte> out;
-  std::vector<std::byte> chunk(64 * 1024);
+  std::vector<std::byte> chunk(std::size_t{64} * 1024);
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (std::chrono::steady_clock::now() < deadline) {
     pollfd p{.fd = fd, .events = POLLIN, .revents = 0};

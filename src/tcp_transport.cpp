@@ -5,6 +5,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include <netdb.h>
@@ -52,7 +53,7 @@ TcpTransport::TcpTransport(Options options)
   resolve(options_.host, options_.port, address_, address_len_);
   epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
   if (epoll_fd_ < 0) {
-    throw std::runtime_error(std::string("epoll_create1: ") + std::strerror(errno));
+    throw std::runtime_error("epoll_create1: " + std::system_category().message(errno));
   }
   start_connect();
 }

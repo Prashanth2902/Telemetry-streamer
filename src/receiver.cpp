@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #include <arpa/inet.h>
@@ -21,7 +22,7 @@ namespace tstream {
 
 namespace {
 
-constexpr std::size_t kReadChunk = 64 * 1024;
+constexpr std::size_t kReadChunk = std::size_t{64} * 1024;
 
 // True for 127.0.0.0/8, ::1, and IPv4-mapped loopback.
 bool is_loopback(const sockaddr_storage& addr) {
@@ -115,7 +116,7 @@ Receiver::Receiver(Options options)
                   ::listen(listen_fd_, 4) == 0;
   ::freeaddrinfo(results);
   if (!ok) {
-    const std::string reason = std::strerror(errno);
+    const std::string reason = std::system_category().message(errno);
     if (listen_fd_ >= 0) {
       ::close(listen_fd_);
     }

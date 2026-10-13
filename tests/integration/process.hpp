@@ -115,7 +115,7 @@ inline std::string find_line(const std::string& text, const std::string& prefix)
   std::istringstream in(text);
   std::string line;
   while (std::getline(in, line)) {
-    if (line.rfind(prefix, 0) == 0) {
+    if (line.starts_with(prefix)) {
       return line;
     }
   }

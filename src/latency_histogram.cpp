@@ -32,10 +32,10 @@ std::uint64_t LatencyHistogram::bucket_upper(std::size_t bucket) {
 
 // Clamps negatives: cross-host or skewed clocks shouldn't index out of range.
 void LatencyHistogram::record(std::int64_t value_ns) {
-  const auto value = static_cast<std::uint64_t>(std::max<std::int64_t>(value_ns, 0));
-  ++buckets_[bucket_for(value)];
+  const std::int64_t clamped = std::max<std::int64_t>(value_ns, 0);
+  ++buckets_[bucket_for(static_cast<std::uint64_t>(clamped))];
   ++count_;
-  max_ = std::max(max_, std::max<std::int64_t>(value_ns, 0));
+  max_ = std::max(max_, clamped);
 }
 
 // Bucket-wise sum; exact, since both use the same bucket layout.

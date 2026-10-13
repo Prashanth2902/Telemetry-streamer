@@ -36,6 +36,7 @@ using tstream::TcpTransport;
 
 TEST(LatencyHistogram, BucketsBoundRelativeErrorBySixteenth) {
   std::vector<std::uint64_t> values;
+  values.reserve(5100);
   for (std::uint64_t v = 0; v < 5000; ++v) {
     values.push_back(v);
   }
