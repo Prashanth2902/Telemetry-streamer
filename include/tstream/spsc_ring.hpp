@@ -60,11 +60,13 @@ class BasicSpscRing {
  public:
   static constexpr std::size_t kCapacity = Capacity;
 
+  // Holds atomics and fixed storage in place: not copyable or movable.
   BasicSpscRing() = default;
   BasicSpscRing(const BasicSpscRing&) = delete;
   BasicSpscRing& operator=(const BasicSpscRing&) = delete;
   BasicSpscRing(BasicSpscRing&&) = delete;
   BasicSpscRing& operator=(BasicSpscRing&&) = delete;
+  // Nothing to release: storage is inline.
   ~BasicSpscRing() = default;
 
   // Producer only. Returns false, without blocking, if the ring is full.
@@ -169,6 +171,7 @@ class BasicSpscRing {
   // Release builds: no owner tracking, and [[no_unique_address]] makes the
   // empty member take no space.
   struct OwnerId {};
+  // No-op in release builds.
   static void check_owner(OwnerId& /*owner*/) {}
 #endif
 

@@ -39,6 +39,7 @@ using tstream::bench::MutexRingQueue;
 constexpr std::size_t kCapacity = 1024;
 constexpr std::uint64_t kItemsPerIter = 1 << 16;
 
+// Spin-wait hint (x86 PAUSE): eases pressure on the sibling hyperthread and the memory bus.
 inline void cpu_relax() {
 #if defined(__x86_64__) || defined(__i386__)
   __builtin_ia32_pause();
@@ -65,6 +66,7 @@ std::optional<std::pair<std::size_t, std::size_t>> bench_cpus() {
   return cpus;
 }
 
+// Pins the calling thread to one CPU; best effort, failures are ignored.
 void pin_current_thread(std::size_t cpu) {
   cpu_set_t set;
   CPU_ZERO(&set);
@@ -72,18 +74,21 @@ void pin_current_thread(std::size_t cpu) {
   pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
 }
 
+// Pins to the producer CPU from TSTREAM_BENCH_CPUS, if set.
 void pin_producer() {
   if (const auto cpus = bench_cpus()) {
     pin_current_thread(cpus->first);
   }
 }
 
+// Pins to the consumer CPU from TSTREAM_BENCH_CPUS, if set.
 void pin_consumer() {
   if (const auto cpus = bench_cpus()) {
     pin_current_thread(cpus->second);
   }
 }
 
+// Items per second through Queue with one producer and one consumer thread.
 template <typename Queue>
 void BM_Throughput(benchmark::State& state) {
   // Heap-allocated: queues hold kCapacity slots and may be over-aligned.
@@ -130,6 +135,7 @@ void BM_Throughput(benchmark::State& state) {
   state.SetItemsProcessed(static_cast<std::int64_t>(next));
 }
 
+// Round-trip time for one value: main -> echo thread -> main.
 template <typename Queue>
 void BM_PingPong(benchmark::State& state) {
   auto to_echo = std::make_unique<Queue>();

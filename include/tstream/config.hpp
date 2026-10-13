@@ -85,7 +85,9 @@ Config parse_config(std::string_view json_text);
 // Read a file and parse it. Throws ConfigError (including for I/O errors).
 Config load_config(const std::string& path);
 
+// Config spelling of a source type, e.g. "sim_imu".
 std::string_view source_type_name(SourceType type);
+// Config spelling of a policy, e.g. "drop_newest".
 std::string_view policy_name(BackpressurePolicy policy);
 
 }  // namespace tstream

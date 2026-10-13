@@ -12,12 +12,14 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 constexpr double kMetersPerDegreeLat = 111'320.0;
 constexpr float kGravity = 9.81F;
 
+// amplitude * sin(2 pi freq t): a smooth periodic signal.
 double wave(double amplitude, double freq_hz, double t_s) {
   return amplitude * std::sin(kTwoPi * freq_hz * t_s);
 }
 
 }  // namespace
 
+// Deterministic: the same (seed, id) always gives the same model seed.
 std::uint64_t model_seed(std::uint64_t seed, std::uint16_t source_id) {
   // splitmix64 finalizer: nearby inputs give unrelated seeds.
   std::uint64_t z = seed + 0x9E3779B97F4A7C15ULL * (std::uint64_t{source_id} + 1);
@@ -26,6 +28,7 @@ std::uint64_t model_seed(std::uint64_t seed, std::uint16_t source_id) {
   return z ^ (z >> 31);
 }
 
+// Slow sinusoidal motion plus Gaussian noise; az stays near 1 g.
 void SimImuModel::fill(Sample& sample, double t_s) {
   sample.imu.ax = static_cast<float>(wave(0.5, 0.10, t_s)) + accel_noise_(rng_);
   sample.imu.ay = static_cast<float>(wave(0.3, 0.05, t_s)) + accel_noise_(rng_);
@@ -35,6 +38,7 @@ void SimImuModel::fill(Sample& sample, double t_s) {
   sample.imu.gz = static_cast<float>(wave(0.05, 0.05, t_s)) + gyro_noise_(rng_);
 }
 
+// Constant-speed track from the start point, converted from meters to degrees.
 void SimGpsModel::fill(Sample& sample, double t_s) {
   constexpr double kHeading = std::numbers::pi / 4;  // north-east
   const double distance_m = kSpeedMps * t_s;
@@ -50,6 +54,7 @@ void SimGpsModel::fill(Sample& sample, double t_s) {
   sample.gps.fix = 3;
 }
 
+// SOC from coulomb counting; voltage is OCV(SOC) minus the IR drop.
 void SimBatteryModel::fill(Sample& sample, double t_s) {
   constexpr double kMeanCurrentA = -40.0;  // discharging
   constexpr double kInternalResistanceOhm = 0.05;

@@ -59,6 +59,7 @@ TEST(SampleRing, PushesAndPopsSamples) {
 
 // --- Models -----------------------------------------------------------------
 
+// Runs a fresh Model for `count` samples at rate_hz, starting at t = 0.
 template <typename Model>
 std::vector<Sample> generate(std::uint64_t seed, int count, double rate_hz) {
   Model model(seed);
@@ -139,15 +140,19 @@ TEST(SimModels, BatteryDischargesWithinPlausibleRanges) {
 // A model that records nothing interesting: payload is the sim time.
 class CountingModel final : public SampleModel {
  public:
+  // Imu, so tests can check that the source copies kind() into each sample.
   [[nodiscard]] SampleKind kind() const override { return SampleKind::Imu; }
+  // Stores the sim time in the payload.
   void fill(Sample& sample, double t_s) override { sample.imu.ax = static_cast<float>(t_s); }
 };
 
+// A FixedRateSource with id 9, driven by CountingModel.
 std::unique_ptr<FixedRateSource> make_counting_source(tstream::SampleRing& ring, double rate_hz) {
   return std::make_unique<FixedRateSource>(9, "counting", rate_hz, ring,
                                            std::make_unique<CountingModel>());
 }
 
+// Pops everything currently in the ring.
 std::vector<Sample> drain(tstream::SampleRing& ring) {
   std::vector<Sample> out(ring.capacity());
   out.resize(ring.try_pop_bulk(out.data(), out.size()));

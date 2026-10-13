@@ -45,6 +45,7 @@ void log_line(std::string_view level, fmt::format_string<Args...> format, Args&&
 std::atomic<bool> g_stop_requested{false};
 static_assert(std::atomic<bool>::is_always_lock_free);
 
+// SIGINT/SIGTERM handler: only sets the flag, which is async-signal-safe.
 extern "C" void handle_stop_signal(int /*signal*/) {
   g_stop_requested.store(true, std::memory_order_relaxed);
 }
@@ -58,6 +59,7 @@ constexpr std::string_view kUsage =
     "usage: tstream --config <path> [--duration <seconds>]\n"
     "  Runs until SIGINT/SIGTERM, or for --duration seconds.\n";
 
+// Parses --config and --duration; nullopt on any malformed or unknown argument.
 std::optional<Options> parse_args(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
@@ -82,6 +84,7 @@ std::optional<Options> parse_args(int argc, char** argv) {
   return options;
 }
 
+// Blocks until a stop signal arrives or duration_s has elapsed.
 void wait_for_stop(std::optional<double> duration_s) {
   const auto start = tstream::Clock::now();
   while (!g_stop_requested.load(std::memory_order_relaxed)) {
@@ -119,6 +122,7 @@ std::uint64_t print_summary(const std::vector<std::unique_ptr<tstream::Source>>&
   return total_lost;
 }
 
+// Builds everything from the config, runs it, shuts down in order; returns the exit code.
 int run(const Options& options) {
   const tstream::Config config = tstream::load_config(options.config_path);
 
@@ -167,6 +171,7 @@ int run(const Options& options) {
 
 }  // namespace
 
+// Parses arguments, installs signal handlers, and maps exceptions to exit codes.
 int main(int argc, char** argv) {
   const auto options = parse_args(argc, argv);
   if (!options) {

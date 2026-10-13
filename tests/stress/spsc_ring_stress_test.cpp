@@ -32,6 +32,7 @@ using tstream::BasicSpscRing;
 using tstream::SpscRing;
 using tstream::SpscRingOptions;
 
+// Items per run: TSTREAM_STRESS_COUNT if set, else a default for the build type.
 std::uint64_t stress_count() {
   // getenv is only unsafe alongside setenv, which nothing here calls; and this
   // runs on the test thread before the producer and consumer start.
@@ -56,6 +57,7 @@ struct ConsumerResult {
   bool ok = true;
 };
 
+// Records the first out-of-order value and counts every value.
 void check_value(ConsumerResult& r, std::uint64_t value) {
   if (r.ok && value != r.received) {
     r.ok = false;
@@ -72,6 +74,7 @@ struct Done {
   std::atomic<bool> flag{false};
 };
 
+// Pushes 0..count-1, yielding while the ring is full, then sets done.
 template <typename Ring>
 void produce(Ring& ring, std::uint64_t count, Done& done) {
   for (std::uint64_t i = 0; i < count; ++i) {
@@ -82,6 +85,7 @@ void produce(Ring& ring, std::uint64_t count, Done& done) {
   done.flag.store(true, std::memory_order_release);
 }
 
+// Pops one at a time until count items arrive, or the producer is done and the ring is empty.
 template <typename Ring>
 ConsumerResult consume_single(Ring& ring, std::uint64_t count, const Done& done) {
   ConsumerResult r;
@@ -101,6 +105,7 @@ ConsumerResult consume_single(Ring& ring, std::uint64_t count, const Done& done)
   return r;
 }
 
+// Like consume_single, but pops up to BatchSize at a time.
 template <typename Ring, std::size_t BatchSize>
 ConsumerResult consume_bulk(Ring& ring, std::uint64_t count, const Done& done) {
   ConsumerResult r;
@@ -125,12 +130,14 @@ ConsumerResult consume_bulk(Ring& ring, std::uint64_t count, const Done& done) {
   return r;
 }
 
+// Fails unless every value arrived exactly once and in order.
 void expect_complete_and_ordered(const ConsumerResult& r, std::uint64_t count) {
   EXPECT_TRUE(r.ok) << "item #" << r.first_bad_index << " had value " << r.first_bad_value
                     << " (expected " << r.first_bad_index << ")";
   EXPECT_EQ(r.received, count);
 }
 
+// One producer and one single-pop consumer over a fresh Ring.
 template <typename Ring>
 void run_single_pop(std::uint64_t count) {
   Ring ring;
@@ -144,6 +151,7 @@ void run_single_pop(std::uint64_t count) {
   EXPECT_EQ(ring.size_approx(), 0U);
 }
 
+// One producer and one bulk-pop consumer over a fresh Ring.
 template <typename Ring, std::size_t BatchSize>
 void run_bulk_pop(std::uint64_t count) {
   Ring ring;

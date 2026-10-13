@@ -7,6 +7,7 @@
 
 namespace {
 
+// Cost of one relaxed atomic increment: proves Google Benchmark links and runs.
 void BM_AtomicIncrement(benchmark::State& state) {
   std::atomic<std::uint64_t> counter{0};
   for (auto _ : state) {

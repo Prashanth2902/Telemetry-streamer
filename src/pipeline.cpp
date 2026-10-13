@@ -6,6 +6,7 @@
 
 namespace tstream {
 
+// All allocation happens here: batch storage and per-ring counters.
 Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, BatchSink& sink)
     : rings_(std::move(rings)),
       sink_(sink),
@@ -17,10 +18,12 @@ Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, Bat
   }
 }
 
+// stop() is idempotent, so destroying a stopped pipeline is fine.
 Pipeline::~Pipeline() {
   stop();
 }
 
+// No-op if the thread is already running.
 void Pipeline::start() {
   if (thread_.joinable()) {
     return;
@@ -28,6 +31,7 @@ void Pipeline::start() {
   thread_ = std::thread([this] { run(); });
 }
 
+// The release store pairs with the acquire load in run().
 void Pipeline::stop() {
   stop_requested_.store(true, std::memory_order_release);
   if (thread_.joinable()) {
@@ -35,14 +39,17 @@ void Pipeline::stop() {
   }
 }
 
+// Relaxed: a monitoring read; join() in stop() makes it exact afterwards.
 std::uint64_t Pipeline::delivered(std::size_t ring_index) const {
   return delivered_[ring_index].load(std::memory_order_relaxed);
 }
 
+// Relaxed for the same reason as delivered().
 std::uint64_t Pipeline::batches() const {
   return batches_.load(std::memory_order_relaxed);
 }
 
+// The ring each pass starts from rotates, so no ring is always drained first.
 void Pipeline::run() {
   std::size_t first_ring = 0;
   while (true) {
@@ -74,6 +81,7 @@ void Pipeline::run() {
   }
 }
 
+// Pops into the batch's free slots and flushes mid-pass whenever the batch fills.
 std::size_t Pipeline::drain_pass(std::size_t first_ring) {
   std::size_t total = 0;
   for (std::size_t k = 0; k < rings_.size(); ++k) {
@@ -99,6 +107,7 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
   return total;
 }
 
+// The view is only valid during send(), so counters are updated after it returns.
 void Pipeline::flush() {
   const BatchView view{
       .batch_seq = next_batch_seq_++, .t_flush_ns = now_ns(), .samples = batcher_.samples()};
@@ -113,6 +122,7 @@ void Pipeline::flush() {
   batcher_.clear();
 }
 
+// Returns at once if the open batch is already due.
 void Pipeline::idle_wait() const {
   auto sleep = kIdleSleep;
   if (!batcher_.empty()) {
