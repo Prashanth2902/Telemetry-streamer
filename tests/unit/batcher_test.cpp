@@ -14,6 +14,7 @@ using tstream::Sample;
 
 constexpr std::int64_t kDelayNs = 2'000'000;  // 2 ms
 
+// Commits one sample carrying `seq` at time now_ns.
 void add(Batcher& b, std::uint32_t seq, std::int64_t now_ns) {
   ASSERT_GT(b.free_count(), 0U);
   b.free_slots()->seq = seq;

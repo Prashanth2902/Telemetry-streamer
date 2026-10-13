@@ -24,6 +24,7 @@ struct Item {
 };
 static_assert(std::is_trivially_copyable_v<Item>);
 
+// An Item whose fields are all derived from seq.
 Item make_item(std::uint64_t seq) {
   Item item{};
   item.seq = seq;
@@ -31,6 +32,7 @@ Item make_item(std::uint64_t seq) {
   return item;
 }
 
+// Checks that item equals make_item(seq).
 void expect_item(const Item& item, std::uint64_t seq) {
   EXPECT_EQ(item.seq, seq);
   EXPECT_EQ(item.payload[0], static_cast<std::uint8_t>(seq));
@@ -222,6 +224,7 @@ TEST(SpscRingTypes, WorksWithScalarTypes) {
 // assert if a different thread does so later. Release and RelWithDebInfo
 // builds (including the tsan presets) compile the check out.
 #ifndef NDEBUG
+// Pushes from this thread, then from a second one: must trip the debug check.
 // Results are discarded on purpose: only the second thread's call matters.
 void push_from_two_threads() {
   SpscRing<int, 8> ring;
@@ -230,6 +233,7 @@ void push_from_two_threads() {
   other.join();
 }
 
+// The same for the consumer side.
 void pop_from_two_threads() {
   SpscRing<int, 8> ring;
   static_cast<void>(ring.try_push(1));

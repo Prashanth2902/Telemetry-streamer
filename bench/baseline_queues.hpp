@@ -16,6 +16,7 @@ namespace tstream::bench {
 template <typename T, std::size_t Capacity>
 class MutexDequeQueue {
  public:
+  // Appends under the lock; false if Capacity items are already queued.
   bool try_push(const T& value) {
     const std::scoped_lock lock(mutex_);
     if (items_.size() == Capacity) {
@@ -25,6 +26,7 @@ class MutexDequeQueue {
     return true;
   }
 
+  // Takes the front item under the lock; false if empty.
   bool try_pop(T& out) {
     const std::scoped_lock lock(mutex_);
     if (items_.empty()) {
@@ -45,6 +47,7 @@ class MutexDequeQueue {
 template <typename T, std::size_t Capacity>
 class MutexRingQueue {
  public:
+  // Writes the slot after the last item, under the lock; false if full.
   bool try_push(const T& value) {
     const std::scoped_lock lock(mutex_);
     if (size_ == Capacity) {
@@ -55,6 +58,7 @@ class MutexRingQueue {
     return true;
   }
 
+  // Reads the oldest slot and advances head_, under the lock; false if empty.
   bool try_pop(T& out) {
     const std::scoped_lock lock(mutex_);
     if (size_ == 0) {

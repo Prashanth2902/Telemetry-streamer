@@ -39,6 +39,7 @@ class RecordingSink final : public tstream::BatchSink {
     std::vector<Sample> samples;
   };
 
+  // Copies the batch, since the view is only valid during send().
   void send(const BatchView& batch) override {
     batches.push_back(
         {batch.batch_seq, batch.t_flush_ns, {batch.samples.begin(), batch.samples.end()}});
@@ -54,6 +55,7 @@ class MockSink final : public tstream::BatchSink {
   MOCK_METHOD(void, send, (const BatchView& batch), (override));
 };
 
+// A sample with the given header fields, stamped now.
 Sample make_sample(std::uint16_t source_id, std::uint32_t seq) {
   Sample s{};
   s.source_id = source_id;
@@ -62,12 +64,14 @@ Sample make_sample(std::uint16_t source_id, std::uint32_t seq) {
   return s;
 }
 
+// Pushes seq 0..count-1 for one source; the ring must have room.
 void push_n(SampleRing& ring, std::uint16_t source_id, std::uint32_t count) {
   for (std::uint32_t seq = 0; seq < count; ++seq) {
     ASSERT_TRUE(ring.try_push(make_sample(source_id, seq)));
   }
 }
 
+// A BatchConfig with the given limits.
 BatchConfig batch_config(std::size_t max_samples, std::uint32_t max_delay_us) {
   BatchConfig c;
   c.max_samples = max_samples;
@@ -75,6 +79,7 @@ BatchConfig batch_config(std::size_t max_samples, std::uint32_t max_delay_us) {
   return c;
 }
 
+// Polls `done` every millisecond; false if it isn't true within timeout.
 template <typename Predicate>
 bool wait_for(Predicate done, std::chrono::milliseconds timeout = 2000ms) {
   const auto deadline = tstream::Clock::now() + timeout;

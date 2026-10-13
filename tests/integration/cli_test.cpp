@@ -39,6 +39,7 @@ struct RunResult {
   std::string err;
 };
 
+// Whole file as a string; empty if it doesn't exist.
 std::string read_file(const fs::path& path) {
   std::ifstream in(path);
   std::ostringstream text;
@@ -48,20 +49,24 @@ std::string read_file(const fs::path& path) {
 
 class CliTest : public ::testing::Test {
  protected:
+  // A fresh temporary directory per test.
   void SetUp() override {
     const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
     dir_ = fs::temp_directory_path() /
            ("tstream_cli_" + std::string(info->name()) + "_" + std::to_string(::getpid()));
     fs::create_directories(dir_);
   }
+  // Removes the test's temporary directory.
   void TearDown() override { fs::remove_all(dir_); }
 
+  // Writes a config into the temp directory and returns its path.
   fs::path write_config(const nlohmann::json& config) {
     const fs::path path = dir_ / "config.json";
     std::ofstream(path) << config.dump(2);
     return path;
   }
 
+  // configs/default.json as a mutable JSON object.
   static nlohmann::json default_config() {
     return nlohmann::json::parse(read_file(kDefaultConfig));
   }
@@ -135,6 +140,7 @@ struct Totals {
   std::uint64_t batches = 0;
 };
 
+// Parses the "summary total" line; found is false if there isn't one.
 Totals parse_totals(const std::string& out) {
   static const std::regex kTotal(
       R"(summary total generated=(\d+) dropped=(\d+) delivered=(\d+) lost=(\d+) batches=(\d+))");
@@ -167,6 +173,7 @@ std::pair<std::uint64_t, std::uint64_t> sum_batch_lines(const std::string& out) 
   return {samples, lines};
 }
 
+// Exit 0, lost=0, and printed batches that add up to the delivered count.
 void expect_clean_shutdown(const RunResult& r) {
   EXPECT_EQ(r.exit_code, 0) << r.err;
   const auto totals = parse_totals(r.out);
