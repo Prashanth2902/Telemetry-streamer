@@ -5,9 +5,7 @@
 // "recv summary ..." line and one "recv source=..." line per source.
 // Exit codes: 0 ok, 1 usage error, 2 cannot listen.
 
-#include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,18 +21,9 @@
 #include "tstream/framing.hpp"
 #include "tstream/latency_histogram.hpp"
 #include "tstream/receiver.hpp"
+#include "tstream/stop_signal.hpp"
 
 namespace {
-
-// Set from the signal handler; std::atomic<bool> is lock-free, so storing to
-// it is async-signal-safe.
-std::atomic<bool> g_stop_requested{false};
-static_assert(std::atomic<bool>::is_always_lock_free);
-
-// SIGINT/SIGTERM handler: only sets the flag.
-extern "C" void handle_stop_signal(int /*signal*/) {
-  g_stop_requested.store(true, std::memory_order_relaxed);
-}
 
 struct Options {
   tstream::Receiver::Options receiver;
@@ -170,7 +159,7 @@ void run(tstream::Receiver& receiver, const Options& options) {
   tstream::LatencyHistogram e2e;
   tstream::LatencyHistogram pipeline;
 
-  while (!g_stop_requested.load(std::memory_order_relaxed)) {
+  while (!tstream::stop_requested()) {
     receiver.poll(20);
     const auto now = tstream::Clock::now();
     const double elapsed_s = std::chrono::duration<double>(now - start).count();
@@ -197,8 +186,7 @@ int main(int argc, char** argv) {
     std::fwrite(kUsage.data(), 1, kUsage.size(), stderr);
     return 1;
   }
-  std::signal(SIGINT, handle_stop_signal);
-  std::signal(SIGTERM, handle_stop_signal);
+  tstream::install_stop_signal_handlers();
 
   try {
     tstream::Receiver receiver(options->receiver);

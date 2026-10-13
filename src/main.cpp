@@ -3,9 +3,7 @@
 //
 // Exit codes: 0 ok, 1 usage error, 2 config error, 3 samples unaccounted for.
 
-#include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +24,7 @@
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
 #include "tstream/source.hpp"
+#include "tstream/stop_signal.hpp"
 #include "tstream/tcp_transport.hpp"
 
 namespace {
@@ -39,16 +38,6 @@ template <typename... Args>
 void log_line(std::string_view level, fmt::format_string<Args...> format, Args&&... args) {
   fmt::print(stderr, "[tstream] [{}] {}\n", level,
              fmt::format(format, std::forward<Args>(args)...));
-}
-
-// Set from the signal handler; std::atomic<bool> is lock-free, so storing to
-// it is async-signal-safe.
-std::atomic<bool> g_stop_requested{false};
-static_assert(std::atomic<bool>::is_always_lock_free);
-
-// SIGINT/SIGTERM handler: only sets the flag, which is async-signal-safe.
-extern "C" void handle_stop_signal(int /*signal*/) {
-  g_stop_requested.store(true, std::memory_order_relaxed);
 }
 
 enum class SinkKind : std::uint8_t { Tcp, Stdout };
@@ -101,7 +90,7 @@ std::optional<Options> parse_args(int argc, char** argv) {
 // Blocks until a stop signal arrives or duration_s has elapsed.
 void wait_for_stop(std::optional<double> duration_s) {
   const auto start = tstream::Clock::now();
-  while (!g_stop_requested.load(std::memory_order_relaxed)) {
+  while (!tstream::stop_requested()) {
     if (duration_s &&
         std::chrono::duration<double>(tstream::Clock::now() - start).count() >= *duration_s) {
       return;
@@ -220,8 +209,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::signal(SIGINT, handle_stop_signal);
-  std::signal(SIGTERM, handle_stop_signal);
+  tstream::install_stop_signal_handlers();
 
   try {
     return run(*options);
