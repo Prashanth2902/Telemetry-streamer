@@ -26,10 +26,9 @@
 #include <string>
 #include <vector>
 
-#include <sys/socket.h>
-
 #include "tstream/clock.hpp"
 #include "tstream/encoder.hpp"
+#include "tstream/net.hpp"
 #include "tstream/sink.hpp"
 
 namespace tstream {
@@ -100,8 +99,7 @@ class TcpTransport final : public BatchSink {
   void count_drop(std::size_t samples);
 
   Options options_;
-  sockaddr_storage address_{};
-  socklen_t address_len_ = 0;
+  SocketAddress address_;
   Encoder encoder_;
 
   int epoll_fd_ = -1;

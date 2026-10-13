@@ -8,7 +8,7 @@
 #include <system_error>
 #include <utility>
 
-#include <netdb.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -16,22 +16,6 @@
 namespace tstream {
 
 namespace {
-
-// Resolves host:port to the first TCP address getaddrinfo returns.
-void resolve(const std::string& host, std::uint16_t port, sockaddr_storage& out,
-             socklen_t& out_len) {
-  addrinfo hints{};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  addrinfo* results = nullptr;
-  const int rc = ::getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &results);
-  if (rc != 0 || results == nullptr) {
-    throw std::runtime_error("cannot resolve " + host + ": " + ::gai_strerror(rc));
-  }
-  std::memcpy(&out, results->ai_addr, results->ai_addrlen);
-  out_len = results->ai_addrlen;
-  ::freeaddrinfo(results);
-}
 
 // Closes fd if open and marks it closed.
 void close_fd(int& fd) {
@@ -49,7 +33,7 @@ TcpTransport::TcpTransport(Options options)
       encoder_(options_.max_samples),
       backoff_(options_.initial_backoff),
       pending_(max_frame_bytes_for(options_.max_samples)) {
-  resolve(options_.host, options_.port, address_, address_len_);
+  address_ = resolve_tcp(options_.host, options_.port, /*passive=*/false);
   epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
   if (epoll_fd_ < 0) {
     throw std::runtime_error("epoll_create1: " + std::system_category().message(errno));
@@ -166,7 +150,7 @@ void TcpTransport::service_events(int timeout_ms) {
 // connect() on a non-blocking socket usually returns EINPROGRESS; on loopback
 // it can also succeed immediately.
 void TcpTransport::start_connect() {
-  fd_ = ::socket(address_.ss_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  fd_ = ::socket(address_.family(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd_ < 0) {
     disconnect(/*was_connected=*/false);
     return;
@@ -174,7 +158,7 @@ void TcpTransport::start_connect() {
   const int one = 1;
   ::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 
-  const int rc = ::connect(fd_, reinterpret_cast<const sockaddr*>(&address_), address_len_);
+  const int rc = ::connect(fd_, address_.get(), address_.length);
   if (rc == 0) {
     state_ = State::Connecting;  // finish_connect() makes the bookkeeping uniform
     finish_connect();
