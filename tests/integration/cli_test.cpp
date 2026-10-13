@@ -1,4 +1,4 @@
-// End-to-end tests of the tstream executable (SPEC §13 "Integration").
+// Integration tests of the tstream executable with the stdout sink (SPEC §13).
 // Each test spawns the real binary, so sanitizer presets check the whole
 // program, including shutdown.
 
@@ -14,15 +14,12 @@
 #include <thread>
 #include <vector>
 
-#include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <spawn.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
-extern char** environ;
+#include "process.hpp"
 
 namespace {
 
@@ -39,13 +36,7 @@ struct RunResult {
   std::string err;
 };
 
-// Whole file as a string; empty if it doesn't exist.
-std::string read_file(const fs::path& path) {
-  std::ifstream in(path);
-  std::ostringstream text;
-  text << in.rdbuf();
-  return text.str();
-}
+using tstream::testing::read_file;
 
 class CliTest : public ::testing::Test {
  protected:
@@ -71,58 +62,24 @@ class CliTest : public ::testing::Test {
     return nlohmann::json::parse(read_file(kDefaultConfig));
   }
 
-  // Runs tstream with `args`. If `signal_after` is set, sends `signal` after
-  // that delay. Fails the test (and kills the process) if it doesn't exit
-  // within 60 s.
+  // Runs tstream with `--sink stdout` plus `args` (these tests read the batch
+  // lines; the TCP path is covered by e2e_test). If `signal_after` is set,
+  // sends `signal` after that delay. Fails the test if it doesn't exit in 60 s.
   RunResult run(const std::vector<std::string>& args,
                 std::optional<std::chrono::milliseconds> signal_after = std::nullopt,
                 int signal = SIGINT) {
     const fs::path out_path = dir_ / "stdout.txt";
     const fs::path err_path = dir_ / "stderr.txt";
+    std::vector<std::string> full_args{"--sink", "stdout"};
+    full_args.insert(full_args.end(), args.begin(), args.end());
 
-    posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, out_path.c_str(),
-                                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, err_path.c_str(),
-                                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-    std::vector<std::string> storage{kBinary.string()};
-    storage.insert(storage.end(), args.begin(), args.end());
-    std::vector<char*> argv;
-    argv.reserve(storage.size() + 1);
-    for (auto& s : storage) {
-      argv.push_back(s.data());
-    }
-    argv.push_back(nullptr);
-
-    pid_t pid = 0;
-    const int rc = posix_spawn(&pid, kBinary.c_str(), &actions, nullptr, argv.data(), environ);
-    posix_spawn_file_actions_destroy(&actions);
-    EXPECT_EQ(rc, 0) << "posix_spawn failed for " << kBinary;
-    if (rc != 0) {
-      return {};
-    }
-
+    tstream::testing::ChildProcess child(kBinary, full_args, out_path, err_path);
     if (signal_after) {
       std::this_thread::sleep_for(*signal_after);
-      ::kill(pid, signal);
+      child.signal(signal);
     }
-
-    int status = 0;
-    const auto deadline = std::chrono::steady_clock::now() + 60s;
-    while (::waitpid(pid, &status, WNOHANG) == 0) {
-      if (std::chrono::steady_clock::now() > deadline) {
-        ::kill(pid, SIGKILL);
-        ::waitpid(pid, &status, 0);
-        ADD_FAILURE() << "tstream did not exit within 60 s";
-        break;
-      }
-      std::this_thread::sleep_for(10ms);
-    }
-
     RunResult result;
-    result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    result.exit_code = child.wait();
     result.out = read_file(out_path);
     result.err = read_file(err_path);
     return result;
@@ -242,6 +199,7 @@ TEST_F(CliTest, BadArgumentsPrintUsage) {
                                              {"--config"},
                                              {"--duration", "1"},
                                              {"--config", "x", "--duration", "-1"},
+                                             {"--config", "x", "--sink", "bogus"},
                                              {"--bogus"}}) {
     const auto r = run(args);
     EXPECT_EQ(r.exit_code, 1);
