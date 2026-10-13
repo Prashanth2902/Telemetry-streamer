@@ -6,19 +6,15 @@
 #include <csignal>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <netinet/in.h>
 #include <nlohmann/json.hpp>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include "process.hpp"
+#include "sockets.hpp"
 
 namespace {
 
@@ -28,6 +24,7 @@ using ::testing::HasSubstr;
 using tstream::testing::ChildProcess;
 using tstream::testing::field;
 using tstream::testing::find_line;
+using tstream::testing::free_port;
 using tstream::testing::key_values;
 using tstream::testing::read_file;
 
@@ -35,31 +32,8 @@ const fs::path kSender = TSTREAM_BINARY;
 const fs::path kReceiver = TSTREAM_RECV_BINARY;
 const fs::path kDefaultConfig = fs::path(TSTREAM_SOURCE_DIR) / "configs" / "default.json";
 
-// An ephemeral TCP port nothing is listening on (bound, then released).
-std::uint16_t free_port() {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  EXPECT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
-  socklen_t len = sizeof(addr);
-  ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len);
-  ::close(fd);
-  return ntohs(addr.sin_port);
-}
-
-class E2eTest : public ::testing::Test {
+class E2eTest : public tstream::testing::TempDirTest {
  protected:
-  // A fresh temporary directory per test.
-  void SetUp() override {
-    const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    dir_ = fs::temp_directory_path() /
-           ("tstream_e2e_" + std::string(info->name()) + "_" + std::to_string(::getpid()));
-    fs::create_directories(dir_);
-  }
-  // Removes the test's temporary directory.
-  void TearDown() override { fs::remove_all(dir_); }
-
   // Starts tstream-recv on `port` (0 = any) and returns the port it bound,
   // once it has printed its "listening on" line. `name` keeps output files apart.
   std::uint16_t start_receiver(std::unique_ptr<ChildProcess>& receiver, std::uint16_t port,
@@ -101,8 +75,6 @@ class E2eTest : public ::testing::Test {
     EXPECT_EQ(receiver.wait(), 0) << read_file(dir_ / (name + ".err"));
     return read_file(dir_ / (name + ".out"));
   }
-
-  fs::path dir_;
 };
 
 // The M3 acceptance test: 10 s with zero gaps, and p50/p99 latency reported.

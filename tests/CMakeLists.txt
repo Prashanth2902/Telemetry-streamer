@@ -13,6 +13,7 @@ function(tstream_add_test name)
   endif()
   add_executable(${name} ${ARG_SOURCES})
   target_link_libraries(${name} PRIVATE tstream::core GTest::gtest_main GTest::gmock)
+  target_include_directories(${name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/support")
   tstream_set_warnings(${name})
   gtest_discover_tests(${name}
     DISCOVERY_MODE PRE_TEST

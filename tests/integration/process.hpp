@@ -25,6 +25,23 @@ extern char** environ;
 
 namespace tstream::testing {
 
+// Base fixture: a fresh temporary directory per test, in dir_, removed after.
+class TempDirTest : public ::testing::Test {
+ protected:
+  // Creates /tmp/tstream_<suite>_<test>_<pid>.
+  void SetUp() override {
+    const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    dir_ = std::filesystem::temp_directory_path() /
+           ("tstream_" + std::string(info->test_suite_name()) + "_" + std::string(info->name()) +
+            "_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir_);
+  }
+  // Removes the directory and everything in it.
+  void TearDown() override { std::filesystem::remove_all(dir_); }
+
+  std::filesystem::path dir_;
+};
+
 // Whole file as a string; empty if it doesn't exist.
 inline std::string read_file(const std::filesystem::path& path) {
   std::ifstream in(path);
