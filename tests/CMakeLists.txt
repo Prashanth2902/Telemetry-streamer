@@ -35,6 +35,7 @@ add_dependencies(cli_test tstream)
 tstream_add_test(framing_test LABEL unit SOURCES unit/framing_test.cpp)
 tstream_add_test(encoder_test LABEL unit SOURCES unit/encoder_test.cpp)
 tstream_add_test(tcp_transport_test LABEL unit SOURCES unit/tcp_transport_test.cpp)
+tstream_add_test(receiver_test LABEL unit SOURCES unit/receiver_test.cpp)
 
 # Replaces global operator new, so it must be its own executable (SPEC §9).
 tstream_add_test(encoder_alloc_test LABEL alloc SOURCES alloc/encoder_alloc_test.cpp)

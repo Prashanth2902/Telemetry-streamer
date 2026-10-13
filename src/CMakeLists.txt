@@ -6,6 +6,7 @@ add_library(tstream_core STATIC
   framing.cpp
   latency_histogram.cpp
   pipeline.cpp
+  receiver.cpp
   sample_ring.cpp
   stdout_sink.cpp
   tcp_transport.cpp
