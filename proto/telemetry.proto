@@ -1,0 +1,24 @@
+// Wire schema for tstream batches (SPEC §4.2). Each TCP frame carries one
+// serialized Batch; see include/tstream/framing.hpp for the frame header.
+
+syntax = "proto3";
+package tstream.v1;
+
+message Imu     { float ax = 1; float ay = 2; float az = 3; float gx = 4; float gy = 5; float gz = 6; }
+message Gps     { double lat = 1; double lon = 2; float alt_m = 3; float speed_mps = 4; uint32 fix = 5; }
+message Battery { float voltage_v = 1; float current_a = 2; float soc_pct = 3; float temp_c = 4; }
+message Can     { uint32 can_id = 1; bytes data = 2; }
+message Health  { uint32 source_id = 1; uint32 monitor = 2; uint32 severity = 3; uint32 detail = 4; }
+
+message Sample {
+  uint32 source_id    = 1;
+  uint32 seq          = 2;
+  int64  t_capture_ns = 3;
+  oneof payload { Imu imu = 10; Gps gps = 11; Battery battery = 12; Can can = 13; Health health = 14; }
+}
+
+message Batch {
+  uint64 batch_seq   = 1;
+  int64  t_send_ns   = 2;
+  repeated Sample samples = 3;
+}

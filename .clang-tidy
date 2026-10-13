@@ -17,5 +17,7 @@ Checks: >
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(include|src|tests|bench|tools)/.*'
+# Generated code (Protobuf headers under build/) isn't ours to fix.
+ExcludeHeaderFilterRegex: '.*/build/.*'
 FormatStyle: file
 ...

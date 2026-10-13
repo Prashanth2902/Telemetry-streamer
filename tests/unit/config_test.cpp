@@ -185,6 +185,17 @@ TEST(Config, RejectsWrongTypes) {
   expect_error(j, "sources: must be a non-empty array");
 }
 
+// SPEC §9: max_samples * 61 bytes + overhead must fit in max_frame_bytes.
+TEST(Config, RejectsBatchThatCannotFitInOneFrame) {
+  auto j = example();
+  j["batch"]["max_samples"] = 65536;  // ~4 MB worst case
+  j["transport"]["max_frame_bytes"] = 1048576;
+  expect_error(j, "more than transport.max_frame_bytes");
+
+  j["transport"]["max_frame_bytes"] = 8 * 1024 * 1024;  // now it fits
+  EXPECT_NO_THROW(parse_config(j.dump()));
+}
+
 TEST(Config, LoadConfigReportsMissingFile) {
   try {
     tstream::load_config("/nonexistent/tstream.json");

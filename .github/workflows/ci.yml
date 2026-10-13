@@ -118,4 +118,4 @@ jobs:
           cmake --build --preset clang-debug
 
       - name: clang-tidy
-        run: run-clang-tidy -p build/clang-debug -quiet '/(src|tests|bench|tools)/'
+        run: run-clang-tidy -p build/clang-debug -quiet '^(?!.*/build/).*/(src|tests|bench|tools)/'

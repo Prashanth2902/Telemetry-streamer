@@ -17,6 +17,7 @@ endif()
 option(TSTREAM_BUILD_TESTS "Build unit, stress, and integration tests" ON)
 option(TSTREAM_BUILD_BENCH "Build Google Benchmark targets" OFF)
 option(TSTREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(TSTREAM_BUILD_FUZZ "Build libFuzzer targets (clang only)" OFF)
 set(TSTREAM_SANITIZER "none" CACHE STRING "Sanitizer to build with: none, address, thread")
 set_property(CACHE TSTREAM_SANITIZER PROPERTY STRINGS none address thread)
 
@@ -30,8 +31,10 @@ find_package(nlohmann_json 3.11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Threads REQUIRED)
 
-# Core library (tstream_core) and the tstream executable.
+# Wire schema (tstream_proto), then the core library (tstream_core) and executables.
+add_subdirectory(proto)
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(TSTREAM_BUILD_TESTS)
   enable_testing()
@@ -42,4 +45,8 @@ endif()
 if(TSTREAM_BUILD_BENCH)
   find_package(benchmark REQUIRED)
   add_subdirectory(bench)
+endif()
+
+if(TSTREAM_BUILD_FUZZ)
+  add_subdirectory(fuzz)
 endif()
