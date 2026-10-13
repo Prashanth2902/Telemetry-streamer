@@ -5,7 +5,4 @@ function(tstream_add_bench name)
   tstream_set_warnings(${name})
 endfunction()
 
-# Placeholder so the benchmark dependency and the CI smoke run exist from M0.
-tstream_add_bench(bench_smoke bench_smoke.cpp)
-
 tstream_add_bench(bench_spsc bench_spsc.cpp)
