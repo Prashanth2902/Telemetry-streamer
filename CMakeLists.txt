@@ -34,6 +34,7 @@ find_package(Threads REQUIRED)
 # Wire schema (tstream_proto), then the core library (tstream_core) and executables.
 add_subdirectory(proto)
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(TSTREAM_BUILD_TESTS)
   enable_testing()
