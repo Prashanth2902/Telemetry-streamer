@@ -63,6 +63,7 @@ void Pipeline::run() {
     if (batcher_.due(now_ns())) {
       flush();
     }
+    sink_.poll();
 
     if (stopping) {
       // Sources are stopped, so the rings only get emptier: drain until a

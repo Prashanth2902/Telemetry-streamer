@@ -31,6 +31,10 @@ class BatchSink {
 
   // Called on the pipeline thread, once per batch, in batch_seq order.
   virtual void send(const BatchView& batch) = 0;
+  // Called on the pipeline thread on every loop iteration, batch or not, so
+  // a sink can make progress on its own work (connects, unfinished writes).
+  // Must not block.
+  virtual void poll() {}
   // Called once after the final batch.
   virtual void close() {}
 };
