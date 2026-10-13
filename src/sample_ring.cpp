@@ -13,17 +13,22 @@ namespace {
 template <std::size_t Capacity>
 class SampleRingImpl final : public SampleRing {
  public:
+  // Forwards to SpscRing::try_push.
   bool try_push(const Sample& sample) override { return ring_.try_push(sample); }
+  // Forwards to SpscRing::try_pop_bulk.
   std::size_t try_pop_bulk(Sample* out, std::size_t max) override {
     return ring_.try_pop_bulk(out, max);
   }
+  // Forwards to SpscRing::size_approx.
   [[nodiscard]] std::size_t size_approx() const override { return ring_.size_approx(); }
+  // The compile-time capacity.
   [[nodiscard]] std::size_t capacity() const override { return Capacity; }
 
  private:
   SpscRing<Sample, Capacity> ring_;
 };
 
+// Allocates one ring with compile-time capacity Capacity.
 template <std::size_t Capacity>
 std::unique_ptr<SampleRing> make() {
   return std::make_unique<SampleRingImpl<Capacity>>();
@@ -34,6 +39,7 @@ static_assert(kMinRingCapacity == 16 && kMaxRingCapacity == 65536);
 
 }  // namespace
 
+// Maps the runtime capacity to a compile-time one.
 std::unique_ptr<SampleRing> make_sample_ring(std::size_t capacity) {
   switch (capacity) {
     case 16:

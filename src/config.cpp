@@ -16,10 +16,12 @@ namespace {
 
 using nlohmann::json;
 
+// Throws ConfigError as "<where>: <what>".
 [[noreturn]] void fail(const std::string& where, const std::string& what) {
   throw ConfigError(where + ": " + what);
 }
 
+// Fails unless j is a JSON object.
 void require_object(const json& j, const std::string& where) {
   if (!j.is_object()) {
     fail(where, "must be an object");
@@ -40,6 +42,7 @@ void reject_unknown_keys(const json& j, const std::string& where,
   }
 }
 
+// Returns j[key], failing if the key is missing.
 const json& require_key(const json& j, const std::string& where, const char* key) {
   const auto it = j.find(key);
   if (it == j.end()) {
@@ -48,6 +51,7 @@ const json& require_key(const json& j, const std::string& where, const char* key
   return *it;
 }
 
+// A finite JSON number (integers accepted).
 double get_number(const json& j, const std::string& where) {
   if (!j.is_number()) {
     fail(where, "must be a number");
@@ -59,6 +63,7 @@ double get_number(const json& j, const std::string& where) {
   return value;
 }
 
+// A finite number greater than 0.
 double get_positive(const json& j, const std::string& where) {
   const double value = get_number(j, where);
   if (value <= 0) {
@@ -83,6 +88,7 @@ std::uint64_t get_integer(const json& j, const std::string& where, std::uint64_t
   fail(where, "must be an integer");
 }
 
+// A JSON string.
 std::string get_string(const json& j, const std::string& where) {
   if (!j.is_string()) {
     fail(where, "must be a string");
@@ -90,10 +96,12 @@ std::string get_string(const json& j, const std::string& where) {
   return j.get<std::string>();
 }
 
+// True for 1, 2, 4, 8, ...
 bool is_power_of_two(std::uint64_t n) {
   return n != 0 && (n & (n - 1)) == 0;
 }
 
+// Maps a "type" value to SourceType, failing on unknown names.
 SourceType parse_source_type(const std::string& name, const std::string& where) {
   if (name == "sim_imu") {
     return SourceType::SimImu;
@@ -107,6 +115,7 @@ SourceType parse_source_type(const std::string& name, const std::string& where) 
   fail(where, "unknown source type \"" + name + "\" (expected sim_imu, sim_gps, or sim_battery)");
 }
 
+// Maps a "policy" value to BackpressurePolicy, failing on unknown names.
 BackpressurePolicy parse_policy(const std::string& name, const std::string& where) {
   if (name == "drop_newest") {
     return BackpressurePolicy::DropNewest;
@@ -117,6 +126,7 @@ BackpressurePolicy parse_policy(const std::string& name, const std::string& wher
   fail(where, "unknown policy \"" + name + "\" (expected drop_newest or block_with_timeout)");
 }
 
+// Parses a source's optional absolute health overrides.
 SourceHealthOverrides parse_source_health(const json& j, const std::string& where) {
   require_object(j, where);
   reject_unknown_keys(j, where, {"stale_ms", "rate_window_ms", "rate_tolerance_pct"});
@@ -133,6 +143,7 @@ SourceHealthOverrides parse_source_health(const json& j, const std::string& wher
   return h;
 }
 
+// Parses and validates one entry of "sources".
 SourceConfig parse_source(const json& j, const std::string& where) {
   require_object(j, where);
   reject_unknown_keys(j, where,
@@ -171,6 +182,7 @@ SourceConfig parse_source(const json& j, const std::string& where) {
   return s;
 }
 
+// Parses the "batch" block.
 BatchConfig parse_batch(const json& j) {
   const std::string where = "batch";
   require_object(j, where);
@@ -183,6 +195,7 @@ BatchConfig parse_batch(const json& j) {
   return b;
 }
 
+// Parses the "transport" block.
 TransportConfig parse_transport(const json& j) {
   const std::string where = "transport";
   require_object(j, where);
@@ -203,6 +216,7 @@ TransportConfig parse_transport(const json& j) {
   return t;
 }
 
+// Parses the optional top-level "health" defaults.
 HealthConfig parse_health(const json& j) {
   const std::string where = "health";
   require_object(j, where);
@@ -231,6 +245,7 @@ HealthConfig parse_health(const json& j) {
 
 }  // namespace
 
+// Parses each block, then checks rules that span entries (unique source ids).
 Config parse_config(std::string_view json_text) {
   json root;
   try {
@@ -268,6 +283,7 @@ Config parse_config(std::string_view json_text) {
   return config;
 }
 
+// Reads the whole file, then parses it.
 Config load_config(const std::string& path) {
   std::ifstream in(path);
   if (!in) {
@@ -278,6 +294,7 @@ Config load_config(const std::string& path) {
   return parse_config(text.str());
 }
 
+// Inverse of parse_source_type.
 std::string_view source_type_name(SourceType type) {
   switch (type) {
     case SourceType::SimImu:
@@ -290,6 +307,7 @@ std::string_view source_type_name(SourceType type) {
   return "unknown";
 }
 
+// Inverse of parse_policy.
 std::string_view policy_name(BackpressurePolicy policy) {
   switch (policy) {
     case BackpressurePolicy::DropNewest:

@@ -9,6 +9,7 @@
 
 namespace tstream {
 
+// Counts samples per kind and finds the oldest capture time, then writes one line.
 void StdoutSink::send(const BatchView& batch) {
   std::array<std::size_t, 5> per_kind{};  // indexed by SampleKind
   std::int64_t oldest_capture_ns = std::numeric_limits<std::int64_t>::max();
@@ -28,6 +29,7 @@ void StdoutSink::send(const BatchView& batch) {
   std::fwrite(line.data(), 1, std::min(result.size, line.size()), out_);
 }
 
+// Pushes buffered lines out before the summary is printed.
 void StdoutSink::close() {
   std::fflush(out_);
 }
