@@ -38,7 +38,12 @@ tstream_add_test(tcp_transport_test LABEL unit SOURCES unit/tcp_transport_test.c
 tstream_add_test(receiver_test LABEL unit SOURCES unit/receiver_test.cpp)
 
 # Replaces global operator new, so it must be its own executable (SPEC §9).
-tstream_add_test(encoder_alloc_test LABEL alloc SOURCES alloc/encoder_alloc_test.cpp)
+# Not built with sanitizers: they ship their own operator new (clang's static
+# runtimes then fail to link, and ASan flags new/free mixes), and the point is
+# to measure our code with the real allocator anyway.
+if(TSTREAM_SANITIZER STREQUAL "none")
+  tstream_add_test(encoder_alloc_test LABEL alloc SOURCES alloc/encoder_alloc_test.cpp)
+endif()
 
 tstream_add_test(e2e_test LABEL integration TIMEOUT 300 SOURCES integration/e2e_test.cpp)
 target_compile_definitions(e2e_test PRIVATE

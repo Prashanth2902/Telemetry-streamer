@@ -166,9 +166,11 @@ TEST(EncoderAllocation, LargeBatchesDoNotAllocate) {
 // Sanity check that the counter actually sees allocations.
 TEST(EncoderAllocation, CounterCountsAllocations) {
   g_allocations.store(0, std::memory_order_relaxed);
-  auto* p = new int(42);
+  // A direct call, not a new-expression: compilers may elide `new int` at -O3
+  // (C++14 [expr.new]), but not a call to the replaceable function itself.
+  void* p = ::operator new(16);
   EXPECT_GE(g_allocations.load(std::memory_order_relaxed), 1U);
-  delete p;
+  ::operator delete(p);
 }
 
 // Negative control for the zero results above, and the reason for ADR-005:
