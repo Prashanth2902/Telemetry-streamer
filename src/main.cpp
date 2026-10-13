@@ -1,5 +1,5 @@
-// tstream: the sender (SPEC §3). M2 wiring: simulated sources -> rings ->
-// pipeline -> stdout. M3 swaps the sink for Protobuf over TCP.
+// tstream: the sender (SPEC §3). Simulated sources -> rings -> pipeline ->
+// TcpTransport (framed Protobuf to tstream-recv), or stdout with --sink stdout.
 //
 // Exit codes: 0 ok, 1 usage error, 2 config error, 3 samples unaccounted for.
 
@@ -26,6 +26,7 @@
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
 #include "tstream/source.hpp"
+#include "tstream/tcp_transport.hpp"
 
 namespace {
 
@@ -50,16 +51,20 @@ extern "C" void handle_stop_signal(int /*signal*/) {
   g_stop_requested.store(true, std::memory_order_relaxed);
 }
 
+enum class SinkKind : std::uint8_t { Tcp, Stdout };
+
 struct Options {
   std::string config_path;
   std::optional<double> duration_s;
+  SinkKind sink = SinkKind::Tcp;
 };
 
 constexpr std::string_view kUsage =
-    "usage: tstream --config <path> [--duration <seconds>]\n"
-    "  Runs until SIGINT/SIGTERM, or for --duration seconds.\n";
+    "usage: tstream --config <path> [--duration <seconds>] [--sink tcp|stdout]\n"
+    "  Runs until SIGINT/SIGTERM, or for --duration seconds.\n"
+    "  --sink tcp (default) sends to transport.host:port; stdout prints one line per batch.\n";
 
-// Parses --config and --duration; nullopt on any malformed or unknown argument.
+// Parses --config, --duration, and --sink; nullopt on any malformed or unknown argument.
 std::optional<Options> parse_args(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
@@ -67,6 +72,15 @@ std::optional<Options> parse_args(int argc, char** argv) {
     const bool has_value = i + 1 < argc;
     if (arg == "--config" && has_value) {
       options.config_path = argv[++i];
+    } else if (arg == "--sink" && has_value) {
+      const std::string_view kind = argv[++i];
+      if (kind == "tcp") {
+        options.sink = SinkKind::Tcp;
+      } else if (kind == "stdout") {
+        options.sink = SinkKind::Stdout;
+      } else {
+        return std::nullopt;
+      }
     } else if (arg == "--duration" && has_value) {
       char* end = nullptr;
       const double seconds = std::strtod(argv[++i], &end);
@@ -122,6 +136,17 @@ std::uint64_t print_summary(const std::vector<std::unique_ptr<tstream::Source>>&
   return total_lost;
 }
 
+// One line of transport counters. Batches the transport dropped were already
+// delivered to the sink, so they appear here rather than as `lost`.
+void print_transport_summary(const tstream::TransportCounters& c) {
+  fmt::print(
+      "summary transport batches_sent={} samples_sent={} bytes_sent={} batches_dropped={} "
+      "samples_dropped={} connects={} disconnects={}\n",
+      c.batches_sent, c.samples_sent, c.bytes_sent, c.batches_dropped, c.samples_dropped,
+      c.connects, c.disconnects);
+  std::fflush(stdout);
+}
+
 // Builds everything from the config, runs it, shuts down in order; returns the exit code.
 int run(const Options& options) {
   const tstream::Config config = tstream::load_config(options.config_path);
@@ -139,8 +164,21 @@ int run(const Options& options) {
     sources.push_back(tstream::make_source(source_config, *rings.back(), config.seed));
   }
 
-  tstream::StdoutSink sink;
-  tstream::Pipeline pipeline(ring_ptrs, config.batch, sink);
+  std::unique_ptr<tstream::BatchSink> sink;
+  tstream::TcpTransport* transport = nullptr;  // owned by `sink` when set
+  if (options.sink == SinkKind::Tcp) {
+    tstream::TcpTransport::Options transport_options;
+    transport_options.host = config.transport.host;
+    transport_options.port = config.transport.port;
+    transport_options.max_samples = config.batch.max_samples;
+    auto tcp = std::make_unique<tstream::TcpTransport>(transport_options);
+    transport = tcp.get();
+    sink = std::move(tcp);
+    log_line("info", "sending to {}:{}", config.transport.host, config.transport.port);
+  } else {
+    sink = std::make_unique<tstream::StdoutSink>();
+  }
+  tstream::Pipeline pipeline(ring_ptrs, config.batch, *sink);
 
   log_line("info", "starting {} sources (batch max_samples={} max_delay_us={})", sources.size(),
            config.batch.max_samples, config.batch.max_delay_us);
@@ -158,9 +196,12 @@ int run(const Options& options) {
     source->stop();
   }
   pipeline.stop();
-  sink.close();
+  sink->close();
 
   const std::uint64_t lost = print_summary(sources, pipeline);
+  if (transport != nullptr) {
+    print_transport_summary(transport->counters());
+  }
   if (lost != 0) {
     log_line("error", "{} samples unaccounted for", lost);
     return 3;
