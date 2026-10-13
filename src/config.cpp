@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "tstream/encoder.hpp"
 #include "tstream/sample.hpp"
 
 namespace tstream {
@@ -278,6 +279,14 @@ Config parse_config(std::string_view json_text) {
 
   config.batch = parse_batch(require_key(root, top, "batch"));
   config.transport = parse_transport(require_key(root, top, "transport"));
+  // SPEC §9: the largest batch the pipeline can build must fit in one frame.
+  const std::size_t worst_case = max_frame_bytes_for(config.batch.max_samples);
+  if (worst_case > config.transport.max_frame_bytes) {
+    fail("batch.max_samples", std::to_string(config.batch.max_samples) + " samples can encode to " +
+                                  std::to_string(worst_case) +
+                                  " bytes, more than transport.max_frame_bytes (" +
+                                  std::to_string(config.transport.max_frame_bytes) + ")");
+  }
   if (root.contains("health")) {
     config.health = parse_health(root.at("health"));
   }

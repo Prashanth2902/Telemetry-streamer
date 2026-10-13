@@ -211,7 +211,7 @@ TEST_F(CliTest, SigtermTriggersGracefulShutdown) {
 // sample has to come out of the final flush at shutdown.
 TEST_F(CliTest, FinalBatchIsFlushedOnShutdown) {
   auto config = default_config();
-  config["batch"]["max_samples"] = 65536;
+  config["batch"]["max_samples"] = 16384;  // ~1 MB worst case: fits the default frame limit
   config["batch"]["max_delay_us"] = 10'000'000;
   const auto r = run({"--config", write_config(config).string(), "--duration", "0.5"});
   expect_clean_shutdown(r);
