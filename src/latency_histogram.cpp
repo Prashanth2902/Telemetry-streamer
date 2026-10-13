@@ -38,15 +38,6 @@ void LatencyHistogram::record(std::int64_t value_ns) {
   max_ = std::max(max_, clamped);
 }
 
-// Bucket-wise sum; exact, since both use the same bucket layout.
-void LatencyHistogram::merge(const LatencyHistogram& other) {
-  for (std::size_t i = 0; i < kBuckets; ++i) {
-    buckets_[i] += other.buckets_[i];
-  }
-  count_ += other.count_;
-  max_ = std::max(max_, other.max_);
-}
-
 // Zeroes the counters; no memory is released or allocated.
 void LatencyHistogram::reset() {
   buckets_.fill(0);

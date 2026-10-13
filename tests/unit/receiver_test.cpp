@@ -76,12 +76,10 @@ TEST(LatencyHistogram, EmptyAndNegativeValues) {
   EXPECT_EQ(h.percentile(0.5), 0);
 }
 
-TEST(LatencyHistogram, MergeAndReset) {
+TEST(LatencyHistogram, ResetForgetsEverything) {
   LatencyHistogram a;
-  LatencyHistogram b;
   a.record(100);
-  b.record(1'000'000);
-  a.merge(b);
+  a.record(1'000'000);
   EXPECT_EQ(a.count(), 2U);
   EXPECT_EQ(a.max(), 1'000'000);
   a.reset();

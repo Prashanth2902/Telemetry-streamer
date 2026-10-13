@@ -133,9 +133,4 @@ std::span<const std::byte> Encoder::encode_frame(const BatchView& batch, std::in
   return {frame, framing::kHeaderBytes + payload_size};
 }
 
-// Fixed at construction.
-std::size_t Encoder::max_samples() const {
-  return impl_->max_samples;
-}
-
 }  // namespace tstream

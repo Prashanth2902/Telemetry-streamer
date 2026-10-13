@@ -21,8 +21,6 @@ class LatencyHistogram {
 
   // Adds one value in nanoseconds. Negative values (clock skew) count as 0.
   void record(std::int64_t value_ns);
-  // Adds every value from `other`.
-  void merge(const LatencyHistogram& other);
   // Forgets everything recorded.
   void reset();
 
