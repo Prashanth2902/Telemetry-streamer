@@ -65,6 +65,7 @@ static_assert(sizeof(Sample) == 48, "Sample layout changed; check ring and batch
 // Source id 0 belongs to the pipeline itself (health samples, §4.1).
 inline constexpr std::uint16_t kPipelineSourceId = 0;
 
+// Lowercase name of a sample kind, for logs and stdout lines.
 constexpr std::string_view kind_name(SampleKind kind) {
   switch (kind) {
     case SampleKind::Imu:

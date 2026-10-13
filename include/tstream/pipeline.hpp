@@ -37,10 +37,12 @@ class Pipeline {
   // The pipeline is the single consumer of every ring in `rings`. Rings and
   // sink must outlive it.
   Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, BatchSink& sink);
+  // Owns a thread that captures `this`: not copyable or movable.
   Pipeline(const Pipeline&) = delete;
   Pipeline& operator=(const Pipeline&) = delete;
   Pipeline(Pipeline&&) = delete;
   Pipeline& operator=(Pipeline&&) = delete;
+  // Stops (final drain and flush) if still running.
   ~Pipeline();
 
   // Call once.
@@ -51,12 +53,17 @@ class Pipeline {
   // Samples from rings[i] handed to the sink so far. Exact once stop() has
   // returned.
   [[nodiscard]] std::uint64_t delivered(std::size_t ring_index) const;
+  // Batches handed to the sink so far.
   [[nodiscard]] std::uint64_t batches() const;
 
  private:
+  // Thread body: drain, flush when due, idle when quiet, final drain on stop.
   void run();
+  // One round-robin pass over all rings from first_ring; returns samples taken.
   std::size_t drain_pass(std::size_t first_ring);
+  // Sends the open batch to the sink, credits delivered counts, and clears it.
   void flush();
+  // Sleeps until the open batch is due, or kIdleSleep at most.
   void idle_wait() const;
 
   std::vector<SampleRing*> rings_;

@@ -16,13 +16,16 @@ namespace tstream {
 
 class SampleModel {
  public:
+  // Owned through std::unique_ptr: not copyable or movable.
   SampleModel() = default;
   SampleModel(const SampleModel&) = delete;
   SampleModel& operator=(const SampleModel&) = delete;
   SampleModel(SampleModel&&) = delete;
   SampleModel& operator=(SampleModel&&) = delete;
+  // Virtual: models are deleted through the base class.
   virtual ~SampleModel() = default;
 
+  // The SampleKind this model fills in.
   [[nodiscard]] virtual SampleKind kind() const = 0;
   // Writes the payload for the sample at simulation time t_s. Called in
   // order of increasing t_s; models may keep state between calls.
@@ -35,8 +38,11 @@ std::uint64_t model_seed(std::uint64_t seed, std::uint16_t source_id);
 // Vehicle IMU: gravity on z plus gentle longitudinal/lateral motion.
 class SimImuModel final : public SampleModel {
  public:
+  // seed: use model_seed(config seed, source id).
   explicit SimImuModel(std::uint64_t seed) : rng_(seed) {}
+  // Always SampleKind::Imu.
   [[nodiscard]] SampleKind kind() const override { return SampleKind::Imu; }
+  // Accel: gravity on z plus slow motion; gyro: slow yaw. All with noise.
   void fill(Sample& sample, double t_s) override;
 
  private:
@@ -52,8 +58,11 @@ class SimGpsModel final : public SampleModel {
   static constexpr double kStartLon = -71.0892;
   static constexpr double kSpeedMps = 15.0;
 
+  // seed: use model_seed(config seed, source id).
   explicit SimGpsModel(std::uint64_t seed) : rng_(seed) {}
+  // Always SampleKind::Gps.
   [[nodiscard]] SampleKind kind() const override { return SampleKind::Gps; }
+  // Position along the north-east track at t_s, plus speed, altitude, and a 3D fix.
   void fill(Sample& sample, double t_s) override;
 
  private:
@@ -70,8 +79,11 @@ class SimBatteryModel final : public SampleModel {
   static constexpr double kCapacityAh = 208.0;
   static constexpr int kCells = 96;
 
+  // seed: use model_seed(config seed, source id).
   explicit SimBatteryModel(std::uint64_t seed) : rng_(seed) {}
+  // Always SampleKind::Battery.
   [[nodiscard]] SampleKind kind() const override { return SampleKind::Battery; }
+  // Voltage, current, SOC, and temperature at t_s.
   void fill(Sample& sample, double t_s) override;
 
  private:

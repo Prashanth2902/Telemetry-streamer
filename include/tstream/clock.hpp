@@ -10,10 +10,12 @@ namespace tstream {
 // same machine can subtract a sender's timestamp directly.
 using Clock = std::chrono::steady_clock;
 
+// Nanoseconds since the steady_clock epoch.
 inline std::int64_t to_ns(Clock::time_point t) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
 }
 
+// Current steady_clock time in nanoseconds: the timestamp used everywhere.
 inline std::int64_t now_ns() {
   return to_ns(Clock::now());
 }

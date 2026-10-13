@@ -26,11 +26,13 @@ struct SourceCounters {
 
 class Source {
  public:
+  // Owns a thread: not copyable or movable.
   Source() = default;
   Source(const Source&) = delete;
   Source& operator=(const Source&) = delete;
   Source(Source&&) = delete;
   Source& operator=(Source&&) = delete;
+  // Virtual: sources are owned as std::unique_ptr<Source>.
   virtual ~Source() = default;
 
   // Call once. A restarted source would push from a new thread, which the
@@ -38,7 +40,9 @@ class Source {
   virtual void start() = 0;
   // Stops producing and joins the thread. Safe to call more than once.
   virtual void stop() = 0;
+  // The configured source id (1-65535).
   [[nodiscard]] virtual std::uint16_t id() const = 0;
+  // Source type name, e.g. "sim_imu".
   [[nodiscard]] virtual std::string_view name() const = 0;
   // Relaxed snapshot; exact once stop() has returned.
   [[nodiscard]] virtual SourceCounters counters() const = 0;
@@ -60,18 +64,27 @@ class FixedRateSource final : public Source {
  public:
   static constexpr Clock::duration kStopPollInterval = std::chrono::milliseconds(10);
 
+  // Produces into `ring` at rate_hz using `model`; nothing runs until start().
   FixedRateSource(std::uint16_t id, std::string_view name, double rate_hz, SampleRing& ring,
                   std::unique_ptr<SampleModel> model);
+  // Stops and joins the thread if still running.
   ~FixedRateSource() override;
 
+  // Spawns the producer thread.
   void start() override;
+  // Requests stop and joins the producer thread.
   void stop() override;
+  // See Source::id().
   [[nodiscard]] std::uint16_t id() const override { return id_; }
+  // See Source::name().
   [[nodiscard]] std::string_view name() const override { return name_; }
+  // See Source::counters().
   [[nodiscard]] SourceCounters counters() const override;
 
  private:
+  // Thread body: create, stamp, and push one sample per period.
   void run();
+  // Sleeps until deadline in kStopPollInterval slices; returns early on stop.
   void sleep_until_or_stop(Clock::time_point deadline) const;
 
   const std::uint16_t id_;

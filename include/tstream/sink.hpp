@@ -20,11 +20,13 @@ struct BatchView {
 
 class BatchSink {
  public:
+  // Used by reference through the interface: not copyable or movable.
   BatchSink() = default;
   BatchSink(const BatchSink&) = delete;
   BatchSink& operator=(const BatchSink&) = delete;
   BatchSink(BatchSink&&) = delete;
   BatchSink& operator=(BatchSink&&) = delete;
+  // Virtual: sinks are used through the base class.
   virtual ~BatchSink() = default;
 
   // Called on the pipeline thread, once per batch, in batch_seq order.
@@ -41,8 +43,11 @@ class BatchSink {
 // buffer, so formatting itself doesn't allocate.
 class StdoutSink final : public BatchSink {
  public:
+  // Writes to `out`: stdout by default, any FILE* in tests.
   explicit StdoutSink(std::FILE* out = stdout) : out_(out) {}
+  // Prints one summary line for the batch.
   void send(const BatchView& batch) override;
+  // Flushes buffered output.
   void close() override;
 
  private:
