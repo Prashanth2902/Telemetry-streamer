@@ -34,19 +34,30 @@ If a sanitizer report or gdb hangs for minutes, it's fetching debug info from `d
 
 ## Run
 
+Start the receiver, then the sender (it connects to `transport.host:port` from the config, and retries until the receiver is up):
+
 ```bash
 cmake --preset release && cmake --build --preset release
-./build/release/src/tstream --config configs/default.json              # until Ctrl-C
-./build/release/src/tstream --config configs/default.json --duration 5 # for 5 seconds
+./build/release/tools/tstream-recv --port 9000                          # terminal 1, until Ctrl-C
+./build/release/src/tstream --config configs/default.json --duration 10 # terminal 2
 ```
 
-stdout gets one line per batch, then a per-source summary; logs go to stderr:
+The receiver prints a stats line per second and a summary on exit (latencies in µs; reported only when the sender is on the same host):
 
 ```
-batch 0: 4 samples (imu 2, gps 1, battery 1, can 0, health 0) max_age_us=2103
-...
-summary source=1 type=sim_imu generated=2007 dropped=0 delivered=2007 lost=0 overruns=0
-summary total generated=2031 dropped=0 delivered=2031 lost=0 batches=671
+stats t=1.0s samples=942 rate=942/s batches=311 gaps=0 out_of_order=0 frame_errors=0 decode_errors=0 e2e_us p50=1376.3 p99=2490.4 ...
+recv summary samples=3043 batches=1006 gaps=0 out_of_order=0 batch_seq_gaps=0 frame_errors=0 ...
+recv source=1 samples=3008 gaps=0 out_of_order=0
 ```
 
-Exit codes: `0` clean, `1` usage error, `2` invalid config, `3` samples unaccounted for (`lost` > 0).
+The sender prints a per-source summary and its transport counters; logs go to stderr:
+
+```
+summary source=1 type=sim_imu generated=3008 dropped=0 delivered=3008 lost=0 overruns=0
+summary total generated=3043 dropped=0 delivered=3043 lost=0 batches=1006
+summary transport batches_sent=1006 samples_sent=3043 bytes_sent=157747 batches_dropped=0 samples_dropped=0 connects=1 disconnects=0
+```
+
+Without a receiver, `tstream --config configs/default.json --sink stdout` prints one line per batch instead of sending.
+
+Exit codes: `tstream`: `0` clean, `1` usage or startup error, `2` invalid config, `3` samples unaccounted for (`lost` > 0). `tstream-recv`: `0` clean, `1` usage error, `2` cannot listen.
