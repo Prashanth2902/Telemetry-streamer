@@ -6,7 +6,6 @@
 #include <system_error>
 #include <utility>
 
-#include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <netinet/in.h>

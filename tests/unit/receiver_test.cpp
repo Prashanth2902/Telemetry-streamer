@@ -7,10 +7,8 @@
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <thread>
 #include <vector>
 
-#include <arpa/inet.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>

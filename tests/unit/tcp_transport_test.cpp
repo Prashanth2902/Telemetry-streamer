@@ -10,7 +10,6 @@
 #include <thread>
 #include <vector>
 
-#include <arpa/inet.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <poll.h>
