@@ -2,6 +2,7 @@
 # executable runs.
 add_library(tstream_core STATIC
   config.cpp
+  framing.cpp
   pipeline.cpp
   sample_ring.cpp
   stdout_sink.cpp

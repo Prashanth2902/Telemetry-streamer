@@ -32,3 +32,4 @@ target_compile_definitions(cli_test PRIVATE
   TSTREAM_BINARY="$<TARGET_FILE:tstream>"
   TSTREAM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 add_dependencies(cli_test tstream)
+tstream_add_test(framing_test LABEL unit SOURCES unit/framing_test.cpp)
