@@ -3,7 +3,15 @@ Real-time C++20 telemetry pipeline. Work in progress
 
 ## Build
 
-Requires Linux (developed on WSL2 Ubuntu 26.04) and the packages in `docs/SPEC.md` §11.1.
+Requires Linux (developed on WSL2 Ubuntu 26.04). Install the toolchain and dependencies:
+
+```bash
+sudo apt install -y build-essential clang clang-tidy clang-format cmake ninja-build gdb \
+  libprotobuf-dev protobuf-compiler libgtest-dev libgmock-dev libbenchmark-dev \
+  nlohmann-json3-dev libspdlog-dev can-utils
+```
+
+Then:
 
 ```bash
 cmake --preset debug          # configure (gcc); clang variants: clang-debug, clang-asan, ...

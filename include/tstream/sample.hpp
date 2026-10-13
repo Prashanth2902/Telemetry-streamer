@@ -7,7 +7,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string_view>
 #include <type_traits>
 
 namespace tstream {
@@ -64,22 +63,5 @@ static_assert(sizeof(Sample) == 48, "Sample layout changed; check ring and batch
 
 // Source id 0 belongs to the pipeline itself (health samples, §4.1).
 inline constexpr std::uint16_t kPipelineSourceId = 0;
-
-// Lowercase name of a sample kind, for logs and stdout lines.
-constexpr std::string_view kind_name(SampleKind kind) {
-  switch (kind) {
-    case SampleKind::Imu:
-      return "imu";
-    case SampleKind::Gps:
-      return "gps";
-    case SampleKind::Battery:
-      return "battery";
-    case SampleKind::Can:
-      return "can";
-    case SampleKind::Health:
-      return "health";
-  }
-  return "unknown";
-}
 
 }  // namespace tstream

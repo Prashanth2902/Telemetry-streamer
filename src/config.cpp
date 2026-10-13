@@ -10,6 +10,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "tstream/sample.hpp"
+
 namespace tstream {
 
 namespace {
@@ -149,9 +151,10 @@ SourceConfig parse_source(const json& j, const std::string& where) {
   reject_unknown_keys(j, where,
                       {"id", "type", "rate_hz", "ring_capacity", "policy", "timeout_us", "health"});
   SourceConfig s;
-  // 0 is reserved for the pipeline's own health samples (SPEC §4.1).
-  s.id =
-      static_cast<std::uint16_t>(get_integer(require_key(j, where, "id"), where + ".id", 1, 65535));
+  // kPipelineSourceId (0) is reserved for the pipeline's own health samples
+  // (SPEC §4.1), so configured ids start one above it.
+  s.id = static_cast<std::uint16_t>(
+      get_integer(require_key(j, where, "id"), where + ".id", kPipelineSourceId + 1, 65535));
   s.type = parse_source_type(get_string(require_key(j, where, "type"), where + ".type"),
                              where + ".type");
 
