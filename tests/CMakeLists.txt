@@ -33,3 +33,5 @@ target_compile_definitions(cli_test PRIVATE
   TSTREAM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 add_dependencies(cli_test tstream)
 tstream_add_test(framing_test LABEL unit SOURCES unit/framing_test.cpp)
+tstream_add_test(encoder_test LABEL unit SOURCES unit/encoder_test.cpp)
+
