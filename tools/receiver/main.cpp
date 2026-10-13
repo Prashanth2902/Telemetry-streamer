@@ -146,12 +146,12 @@ void print_summary(const tstream::Receiver& receiver) {
         s.frame_errors[i]);
   }
   fmt::print(
-      "recv summary samples={} batches={} gaps={} out_of_order={} batch_seq_gaps={} "
+      "recv summary samples={} batches={} bytes={} gaps={} out_of_order={} batch_seq_gaps={} "
       "frame_errors={} ({} ) decode_errors={} invalid_samples={} connections={} rejected={} "
       "e2e_us {} pipeline_us {}\n",
-      s.samples, s.batches, receiver.seq().total_gaps(), receiver.seq().total_out_of_order(),
-      s.batch_seq_gaps, s.total_frame_errors(), frame_errors, s.decode_errors, s.invalid_samples,
-      s.connections, s.rejected_connections,
+      s.samples, s.batches, s.bytes, receiver.seq().total_gaps(),
+      receiver.seq().total_out_of_order(), s.batch_seq_gaps, s.total_frame_errors(), frame_errors,
+      s.decode_errors, s.invalid_samples, s.connections, s.rejected_connections,
       latency_text(receiver.e2e_latency(), receiver.latency_available()),
       latency_text(receiver.pipeline_latency(), receiver.latency_available()));
   for (const auto& [id, src] : receiver.seq().sources()) {
