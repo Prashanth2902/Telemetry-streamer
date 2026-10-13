@@ -31,7 +31,8 @@ find_package(nlohmann_json 3.11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Threads REQUIRED)
 
-# Core library (tstream_core) and the tstream executable.
+# Wire schema (tstream_proto), then the core library (tstream_core) and executables.
+add_subdirectory(proto)
 add_subdirectory(src)
 
 if(TSTREAM_BUILD_TESTS)
