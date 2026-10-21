@@ -24,8 +24,7 @@ class ConfigError : public std::runtime_error {
 
 enum class SourceType : std::uint8_t { SimImu, SimGps, SimBattery };
 
-// Backpressure policy when a source's ring is full (SPEC §6). Parsed and
-// validated now; enforced from M4. Until then sources drop the newest sample.
+// Backpressure policy when a source's ring is full (SPEC §6); see PushPolicy.
 enum class BackpressurePolicy : std::uint8_t { DropNewest, BlockWithTimeout };
 
 // Per-source absolute overrides of the global health defaults (SPEC §7, §10).

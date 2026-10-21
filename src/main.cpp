@@ -109,13 +109,13 @@ std::uint64_t print_summary(const std::vector<std::unique_ptr<tstream::Source>>&
   for (std::size_t i = 0; i < sources.size(); ++i) {
     const auto counters = sources[i]->counters();
     const std::uint64_t delivered = pipeline.delivered(i);
-    const std::uint64_t lost = counters.generated - counters.dropped - delivered;
+    const std::uint64_t lost = counters.generated - counters.dropped() - delivered;
     fmt::print(
         "summary source={} type={} generated={} dropped={} delivered={} lost={} overruns={}\n",
-        sources[i]->id(), sources[i]->name(), counters.generated, counters.dropped, delivered, lost,
-        counters.overruns);
+        sources[i]->id(), sources[i]->name(), counters.generated, counters.dropped(), delivered,
+        lost, counters.overruns);
     total_generated += counters.generated;
-    total_dropped += counters.dropped;
+    total_dropped += counters.dropped();
     total_delivered += delivered;
   }
   const std::uint64_t total_lost = total_generated - total_dropped - total_delivered;
@@ -144,10 +144,6 @@ int run(const Options& options) {
   std::vector<std::unique_ptr<tstream::Source>> sources;
   std::vector<tstream::SampleRing*> ring_ptrs;
   for (const auto& source_config : config.sources) {
-    if (source_config.policy != tstream::BackpressurePolicy::DropNewest) {
-      log_line("warn", "source {}: policy {} is enforced from M4; using drop_newest for now",
-               source_config.id, tstream::policy_name(source_config.policy));
-    }
     rings.push_back(tstream::make_sample_ring(source_config.ring_capacity));
     ring_ptrs.push_back(rings.back().get());
     sources.push_back(tstream::make_source(source_config, *rings.back(), config.seed));

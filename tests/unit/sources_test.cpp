@@ -1,5 +1,6 @@
 // SampleRing factory, simulated sensor models, and FixedRateSource.
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -147,9 +148,15 @@ class CountingModel final : public SampleModel {
 };
 
 // A FixedRateSource with id 9, driven by CountingModel.
-std::unique_ptr<FixedRateSource> make_counting_source(tstream::SampleRing& ring, double rate_hz) {
+std::unique_ptr<FixedRateSource> make_counting_source(tstream::SampleRing& ring, double rate_hz,
+                                                      tstream::PushPolicy policy = {}) {
   return std::make_unique<FixedRateSource>(9, "counting", rate_hz, ring,
-                                           std::make_unique<CountingModel>());
+                                           std::make_unique<CountingModel>(), policy);
+}
+
+// block_with_timeout with the given timeout.
+tstream::PushPolicy blocking(std::chrono::milliseconds timeout) {
+  return {.policy = tstream::BackpressurePolicy::BlockWithTimeout, .timeout = timeout};
 }
 
 // Pops everything currently in the ring.
@@ -203,7 +210,8 @@ TEST(FixedRateSource, FullRingDropsNewestAndKeepsSeqConsumed) {
 
   const auto counters = source->counters();
   ASSERT_GT(counters.generated, 16U);
-  EXPECT_EQ(counters.dropped, counters.generated - 16);
+  EXPECT_EQ(counters.dropped_newest, counters.generated - 16);
+  EXPECT_EQ(counters.dropped_timeout, 0U);
 
   const auto samples = drain(*ring);
   ASSERT_EQ(samples.size(), 16U);
@@ -231,6 +239,70 @@ TEST(FixedRateSource, StopIsIdempotent) {
   source->stop();
   source->stop();
   SUCCEED();
+}
+
+// SPEC §6: nobody drains the ring, so every push after it fills waits the
+// full timeout and is then dropped as dropped_timeout, not dropped_newest.
+TEST(FixedRateSource, BlockWithTimeoutDropsAfterTimeout) {
+  const auto ring = tstream::make_sample_ring(16);
+  auto source = make_counting_source(*ring, 1000, blocking(5ms));
+  const auto start = tstream::Clock::now();
+  source->start();
+  std::this_thread::sleep_for(200ms);
+  source->stop();
+  const double elapsed_ms =
+      std::chrono::duration<double, std::milli>(tstream::Clock::now() - start).count();
+
+  const auto c = source->counters();
+  EXPECT_EQ(c.dropped_newest, 0U);
+  EXPECT_EQ(c.dropped_timeout, c.generated - 16);
+  EXPECT_GT(c.dropped_timeout, 0U);
+  // Each drop waited ~5 ms, so far fewer than the 1 kHz drop_newest would make.
+  EXPECT_LE(static_cast<double>(c.dropped_timeout), elapsed_ms / 5.0 + 2);
+}
+
+// A consumer that drains every 20 ms: the producer (2 kHz, 16-slot ring)
+// blocks between drains, but never for the 200 ms timeout, so nothing drops.
+TEST(FixedRateSource, BlockWithTimeoutWaitsForConsumer) {
+  const auto ring = tstream::make_sample_ring(16);
+  auto source = make_counting_source(*ring, 2000, blocking(200ms));
+  std::atomic<bool> producer_done{false};
+  std::size_t consumed = 0;
+  std::thread consumer([&] {
+    std::vector<Sample> buffer(16);
+    while (true) {
+      const bool done = producer_done.load(std::memory_order_acquire);
+      consumed += ring->try_pop_bulk(buffer.data(), buffer.size());
+      if (done && ring->size_approx() == 0) {
+        break;
+      }
+      std::this_thread::sleep_for(done ? 1ms : 20ms);
+    }
+  });
+  source->start();
+  std::this_thread::sleep_for(300ms);
+  source->stop();
+  producer_done.store(true, std::memory_order_release);
+  consumer.join();
+
+  const auto c = source->counters();
+  EXPECT_GT(c.blocked, 0U);
+  // At most the one sample whose wait stop() cut short is dropped; never a
+  // timeout while the consumer keeps up. Every sample is accounted for.
+  EXPECT_LE(c.dropped_timeout, 1U);
+  EXPECT_EQ(c.dropped_newest, 0U);
+  EXPECT_EQ(consumed + c.dropped(), c.generated);
+}
+
+// Blocking must not hold up shutdown, even with a long timeout.
+TEST(FixedRateSource, StopIsPromptWhileBlocked) {
+  const auto ring = tstream::make_sample_ring(16);
+  auto source = make_counting_source(*ring, 1000, blocking(10s));
+  source->start();
+  std::this_thread::sleep_for(50ms);  // ring full, producer blocked
+  const auto before = tstream::Clock::now();
+  source->stop();
+  EXPECT_LT(tstream::Clock::now() - before, 200ms);
 }
 
 TEST(MakeSource, BuildsEachConfiguredType) {
