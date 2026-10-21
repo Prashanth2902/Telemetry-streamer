@@ -3,6 +3,7 @@
 add_library(tstream_core STATIC
   config.cpp
   encoder.cpp
+  fault.cpp
   framing.cpp
   health.cpp
   latency_histogram.cpp
