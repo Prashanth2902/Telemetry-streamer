@@ -156,6 +156,12 @@ int run(const Options& options) {
     transport_options.host = config.transport.host;
     transport_options.port = config.transport.port;
     transport_options.max_samples = config.batch.max_samples;
+    transport_options.max_pending_batches = config.transport.max_pending_batches;
+    transport_options.socket_send_buffer_bytes =
+        static_cast<int>(config.transport.socket_send_buffer_bytes);
+    for (const auto& source_config : config.sources) {
+      transport_options.source_ids.push_back(source_config.id);
+    }
     auto tcp = std::make_unique<tstream::TcpTransport>(transport_options);
     transport = tcp.get();
     sink = std::move(tcp);

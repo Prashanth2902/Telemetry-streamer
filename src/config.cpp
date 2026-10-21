@@ -203,7 +203,9 @@ BatchConfig parse_batch(const json& j) {
 TransportConfig parse_transport(const json& j) {
   const std::string where = "transport";
   require_object(j, where);
-  reject_unknown_keys(j, where, {"host", "port", "max_pending_batches", "max_frame_bytes"});
+  reject_unknown_keys(
+      j, where,
+      {"host", "port", "max_pending_batches", "max_frame_bytes", "socket_send_buffer_bytes"});
   TransportConfig t;
   t.host = get_string(require_key(j, where, "host"), where + ".host");
   if (t.host.empty()) {
@@ -216,6 +218,11 @@ TransportConfig parse_transport(const json& j) {
   if (j.contains("max_frame_bytes")) {
     t.max_frame_bytes = static_cast<std::size_t>(get_integer(
         j.at("max_frame_bytes"), where + ".max_frame_bytes", 1024, std::size_t{256} << 20));
+  }
+  if (j.contains("socket_send_buffer_bytes")) {
+    t.socket_send_buffer_bytes = static_cast<std::size_t>(
+        get_integer(j.at("socket_send_buffer_bytes"), where + ".socket_send_buffer_bytes", 4096,
+                    std::size_t{64} << 20));
   }
   return t;
 }
@@ -286,6 +293,14 @@ Config parse_config(std::string_view json_text) {
                                   std::to_string(worst_case) +
                                   " bytes, more than transport.max_frame_bytes (" +
                                   std::to_string(config.transport.max_frame_bytes) + ")");
+  }
+  // SPEC §6: the transport preallocates max_pending_batches worst-case frames.
+  const std::size_t queue_bytes = config.transport.max_pending_batches * worst_case;
+  if (queue_bytes > kMaxQueueBytes) {
+    fail("transport.max_pending_batches",
+         std::to_string(config.transport.max_pending_batches) + " x " + std::to_string(worst_case) +
+             "-byte frames needs " + std::to_string(queue_bytes) + " bytes, more than the " +
+             std::to_string(kMaxQueueBytes) + "-byte limit");
   }
   if (root.contains("health")) {
     config.health = parse_health(root.at("health"));

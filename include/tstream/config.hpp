@@ -54,6 +54,7 @@ struct TransportConfig {
   std::uint16_t port = 0;
   std::size_t max_pending_batches = 0;
   std::size_t max_frame_bytes = 1 << 20;
+  std::size_t socket_send_buffer_bytes = 0;  // SO_SNDBUF; 0 keeps the kernel default
 };
 
 // Defaults expressed relative to each source's period (SPEC §7).
@@ -77,6 +78,8 @@ struct Config {
 inline constexpr std::size_t kMinRingCapacity = 16;
 inline constexpr std::size_t kMaxRingCapacity = 65536;
 inline constexpr double kMaxRateHz = 100'000;
+// Cap on the transport's preallocated queue: K slots x the worst-case frame.
+inline constexpr std::size_t kMaxQueueBytes = std::size_t{256} << 20;
 
 // Parse and validate JSON text. Throws ConfigError.
 Config parse_config(std::string_view json_text);

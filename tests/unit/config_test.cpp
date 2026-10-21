@@ -196,6 +196,23 @@ TEST(Config, RejectsBatchThatCannotFitInOneFrame) {
   EXPECT_NO_THROW(parse_config(j.dump()));
 }
 
+TEST(Config, ParsesOptionalSocketSendBuffer) {
+  auto j = example();
+  EXPECT_EQ(parse_config(j.dump()).transport.socket_send_buffer_bytes, 0U);
+  j["transport"]["socket_send_buffer_bytes"] = 65536;
+  EXPECT_EQ(parse_config(j.dump()).transport.socket_send_buffer_bytes, 65536U);
+  j["transport"]["socket_send_buffer_bytes"] = 100;
+  expect_error(j, "socket_send_buffer_bytes");
+}
+
+// SPEC §6: K preallocated worst-case frames must stay within kMaxQueueBytes.
+TEST(Config, RejectsPendingQueueThatNeedsTooMuchMemory) {
+  auto j = example();
+  j["batch"]["max_samples"] = 16384;  // ~1 MB frames
+  j["transport"]["max_pending_batches"] = 4096;
+  expect_error(j, "transport.max_pending_batches");
+}
+
 TEST(Config, LoadConfigReportsMissingFile) {
   try {
     tstream::load_config("/nonexistent/tstream.json");
