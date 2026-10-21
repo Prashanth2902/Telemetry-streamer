@@ -4,6 +4,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #include <ifaddrs.h>
@@ -100,6 +101,11 @@ Receiver::Receiver(Options options)
   const int one = 1;
   if (listen_fd_ >= 0) {
     ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if (options_.slow_read_delay.count() > 0) {
+      // Inherited by accepted sockets; must be set before listen().
+      ::setsockopt(listen_fd_, SOL_SOCKET, SO_RCVBUF, &kSlowReceiveBuffer,
+                   sizeof(kSlowReceiveBuffer));
+    }
   }
   const bool ok = listen_fd_ >= 0 && ::bind(listen_fd_, address.get(), address.length) == 0 &&
                   ::listen(listen_fd_, 4) == 0;
@@ -168,6 +174,9 @@ void Receiver::accept_connection() {
   conn_fd_ = fd;
   ++stats_.connections;
   latency_available_ = peer_is_local(fd);
+  if (!slow_until_ && options_.slow_for.count() > 0) {
+    slow_until_ = std::chrono::steady_clock::now() + options_.slow_for;
+  }
   have_batch_seq_ = false;  // a new connection restarts batch numbering checks
   decoder_.reset();
   watch(epoll_fd_, conn_fd_);
@@ -175,21 +184,17 @@ void Receiver::accept_connection() {
 
 // Drains the socket, then hands complete frames to handle_frame().
 void Receiver::read_connection() {
+  const bool throttled = slow();
+  const std::size_t chunk = throttled ? kSlowReadBytes : read_buffer_.size();
   while (true) {
-    const ssize_t n = ::recv(conn_fd_, read_buffer_.data(), read_buffer_.size(), 0);
+    const ssize_t n = ::recv(conn_fd_, read_buffer_.data(), chunk, 0);
     if (n > 0) {
-      stats_.bytes += static_cast<std::uint64_t>(n);
-      decoder_.feed(std::span(read_buffer_.data(), static_cast<std::size_t>(n)));
-      for (auto r = decoder_.next(); r.status != framing::FrameDecoder::Status::NeedMore;
-           r = decoder_.next()) {
-        if (r.status == framing::FrameDecoder::Status::Error) {
-          ++stats_.frame_errors[static_cast<std::size_t>(r.error)];
-          drop_connection();
-          return;
-        }
-        if (!handle_frame(r.payload)) {
-          ++stats_.decode_errors;
-        }
+      if (!consume(std::span(read_buffer_.data(), static_cast<std::size_t>(n)))) {
+        return;
+      }
+      if (throttled) {
+        std::this_thread::sleep_for(options_.slow_read_delay);
+        return;  // one small read per poll() while slow
       }
       continue;
     }
@@ -202,6 +207,32 @@ void Receiver::read_connection() {
     drop_connection();  // EOF or a socket error
     return;
   }
+}
+
+// Stops at the first bad header: the rest of the stream can't be trusted.
+bool Receiver::consume(std::span<const std::byte> bytes) {
+  stats_.bytes += bytes.size();
+  decoder_.feed(bytes);
+  for (auto r = decoder_.next(); r.status != framing::FrameDecoder::Status::NeedMore;
+       r = decoder_.next()) {
+    if (r.status == framing::FrameDecoder::Status::Error) {
+      ++stats_.frame_errors[static_cast<std::size_t>(r.error)];
+      drop_connection();
+      return false;
+    }
+    if (!handle_frame(r.payload)) {
+      ++stats_.decode_errors;
+    }
+  }
+  return true;
+}
+
+// Slow from the start; with slow_for, only until that long after the first connection.
+bool Receiver::slow() const {
+  if (options_.slow_read_delay.count() <= 0) {
+    return false;
+  }
+  return !slow_until_ || std::chrono::steady_clock::now() < *slow_until_;
 }
 
 // Partial frames left in the decoder are discarded with the connection.

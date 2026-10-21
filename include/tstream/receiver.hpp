@@ -6,6 +6,10 @@
 //   and counted.
 // - A bad frame header closes the connection (the stream can't be
 //   resynchronized) and is counted by reason; the sender reconnects.
+// - Slow-consumer mode (SPEC §8 slow_consumer) forces backpressure: each
+//   poll() reads at most kSlowReadBytes and then sleeps slow_read_delay, and the
+//   listening socket gets a small receive buffer so the kernel can't hide the
+//   backlog. slow_for ends the slow phase that long after the first connection.
 // - Latency (SPEC §4.4) is only measured when the sender is on this host,
 //   where both sides read the same CLOCK_MONOTONIC. For a remote sender it is
 //   reported as unavailable instead of as misleading numbers.
@@ -13,8 +17,10 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -47,7 +53,13 @@ class Receiver {
     std::string bind_host = "127.0.0.1";
     std::uint16_t port = 9000;  // 0 picks a free port; see port()
     std::size_t max_frame_bytes = 1 << 20;
+    std::chrono::milliseconds slow_read_delay{0};  // > 0 turns on slow-consumer mode
+    std::chrono::milliseconds slow_for{0};         // 0 = slow for the whole run
   };
+
+  // Slow-consumer mode: bytes per read, and the listening socket's SO_RCVBUF.
+  static constexpr std::size_t kSlowReadBytes = 1024;
+  static constexpr int kSlowReceiveBuffer = 4096;
 
   // Binds and listens. Throws std::runtime_error if that fails.
   explicit Receiver(Options options);
@@ -85,6 +97,11 @@ class Receiver {
   void read_connection();
   // Closes the current connection and readies the decoder for the next one.
   void drop_connection();
+  // Feeds `bytes` to the decoder and handles every complete frame; false if
+  // a bad header closed the connection.
+  bool consume(std::span<const std::byte> bytes);
+  // True while slow-consumer mode is in effect.
+  [[nodiscard]] bool slow() const;
   // Decodes one frame payload and updates stats; false if it isn't a valid Batch.
   bool handle_frame(std::span<const std::byte> payload);
 
@@ -95,6 +112,7 @@ class Receiver {
   std::uint16_t port_ = 0;
   bool latency_available_ = false;
   bool have_batch_seq_ = false;
+  std::optional<std::chrono::steady_clock::time_point> slow_until_;  // set on first connect
   std::uint64_t next_batch_seq_ = 0;
 
   framing::FrameDecoder decoder_;

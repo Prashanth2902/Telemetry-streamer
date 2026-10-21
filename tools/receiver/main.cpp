@@ -34,8 +34,10 @@ struct Options {
 constexpr std::string_view kUsage =
     "usage: tstream-recv [--port N] [--bind ADDR] [--max-frame-bytes N]\n"
     "                    [--interval SECONDS] [--duration SECONDS]\n"
+    "                    [--slow-consumer-ms MS [--slow-for SECONDS]]\n"
     "  Defaults: --port 9000 --bind 127.0.0.1 --max-frame-bytes 1048576 --interval 1\n"
-    "  --port 0 picks a free port (printed on the first line).\n";
+    "  --port 0 picks a free port (printed on the first line).\n"
+    "  --slow-consumer-ms reads 1 KiB per MS to force backpressure; --slow-for ends that.\n";
 
 // Parses a positive number; nullopt if `text` isn't one.
 std::optional<double> parse_positive(const char* text) {
@@ -80,6 +82,19 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
       options.receiver.max_frame_bytes = static_cast<std::size_t>(*bytes);
+    } else if (arg == "--slow-consumer-ms") {
+      const auto ms = parse_uint(value, 1, 60'000);
+      if (!ms) {
+        return std::nullopt;
+      }
+      options.receiver.slow_read_delay = std::chrono::milliseconds(*ms);
+    } else if (arg == "--slow-for") {
+      const auto seconds = parse_positive(value);
+      if (!seconds) {
+        return std::nullopt;
+      }
+      options.receiver.slow_for =
+          std::chrono::milliseconds(static_cast<std::int64_t>(*seconds * 1000));
     } else if (arg == "--interval" || arg == "--duration") {
       const auto seconds = parse_positive(value);
       if (!seconds) {
