@@ -302,11 +302,14 @@ bool Receiver::handle_frame(std::span<const std::byte> payload) {
   return true;
 }
 
-// Wire values are uint32; anything that doesn't fit HealthData's fields reads
-// as 0, which monitor_name() and severity_name() report as unknown.
+// Wire values are uint32. A monitor or severity that doesn't fit a byte
+// becomes 0xFF, which monitor_name() and severity_name() report as unknown
+// (0 would read as a real severity, Cleared).
 void Receiver::record_health(std::int64_t t_capture_ns, std::uint32_t source_id,
                              std::uint32_t monitor, std::uint32_t severity, std::uint32_t detail) {
-  const auto narrow8 = [](std::uint32_t v) { return static_cast<std::uint8_t>(v <= 0xFF ? v : 0); };
+  const auto narrow8 = [](std::uint32_t v) {
+    return static_cast<std::uint8_t>(v <= 0xFF ? v : 0xFF);
+  };
   ReceivedHealthEvent event;
   event.t_capture_ns = t_capture_ns;
   event.data = {.source_id = static_cast<std::uint16_t>(source_id <= 0xFFFF ? source_id : 0),
