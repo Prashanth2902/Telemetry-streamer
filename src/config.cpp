@@ -130,16 +130,26 @@ BackpressurePolicy parse_policy(const std::string& name, const std::string& wher
   fail(where, "unknown policy \"" + name + "\" (expected drop_newest or block_with_timeout)");
 }
 
+// At least 1 ms: the rate monitor splits a window into 10 buckets and closes
+// them one by one, so a sub-microsecond window would spin the pipeline.
+double get_window_ms(const json& j, const std::string& where) {
+  const double value = get_number(j, where);
+  if (value < 1) {
+    fail(where, "must be at least 1 (ms)");
+  }
+  return value;
+}
+
 // Parses a source's optional absolute health overrides.
 SourceHealthOverrides parse_source_health(const json& j, const std::string& where) {
   require_object(j, where);
   reject_unknown_keys(j, where, {"stale_ms", "rate_window_ms", "rate_tolerance_pct"});
   SourceHealthOverrides h;
   if (j.contains("stale_ms")) {
-    h.stale_ms = get_positive(j.at("stale_ms"), where + ".stale_ms");
+    h.stale_ms = get_window_ms(j.at("stale_ms"), where + ".stale_ms");
   }
   if (j.contains("rate_window_ms")) {
-    h.rate_window_ms = get_positive(j.at("rate_window_ms"), where + ".rate_window_ms");
+    h.rate_window_ms = get_window_ms(j.at("rate_window_ms"), where + ".rate_window_ms");
   }
   if (j.contains("rate_tolerance_pct")) {
     h.rate_tolerance_pct = get_positive(j.at("rate_tolerance_pct"), where + ".rate_tolerance_pct");
@@ -240,13 +250,13 @@ HealthConfig parse_health(const json& j) {
     h.stale_periods = get_positive(j.at("stale_periods"), where + ".stale_periods");
   }
   if (j.contains("stale_min_ms")) {
-    h.stale_min_ms = get_positive(j.at("stale_min_ms"), where + ".stale_min_ms");
+    h.stale_min_ms = get_window_ms(j.at("stale_min_ms"), where + ".stale_min_ms");
   }
   if (j.contains("rate_tolerance_pct")) {
     h.rate_tolerance_pct = get_positive(j.at("rate_tolerance_pct"), where + ".rate_tolerance_pct");
   }
   if (j.contains("rate_window_ms")) {
-    h.rate_window_ms = get_positive(j.at("rate_window_ms"), where + ".rate_window_ms");
+    h.rate_window_ms = get_window_ms(j.at("rate_window_ms"), where + ".rate_window_ms");
   }
   if (j.contains("rate_min_samples")) {
     h.rate_min_samples = static_cast<std::size_t>(
@@ -351,9 +361,19 @@ void add_fault(Config& config, std::string_view text) {
   if (source == nullptr) {
     fail(quoted, "no source with id " + std::to_string(fault.source_id));
   }
-  if (fault.kind == FaultKind::Rate && source->rate_hz * fault.arg > kMaxRateHz) {
-    fail(quoted, "would run source " + std::to_string(fault.source_id) + " above " +
-                     std::to_string(static_cast<int>(kMaxRateHz)) + " Hz");
+  if (fault.kind == FaultKind::Rate) {
+    // Overlapping rate faults multiply, so bound the product of all of them
+    // on this source (stricter than checking only the ones that overlap).
+    double factor = fault.arg;
+    for (const Fault& f : config.faults) {
+      if (f.kind == FaultKind::Rate && f.source_id == fault.source_id) {
+        factor *= f.arg;
+      }
+    }
+    if (source->rate_hz * factor > kMaxRateHz) {
+      fail(quoted, "would run source " + std::to_string(fault.source_id) + " above " +
+                       std::to_string(static_cast<int>(kMaxRateHz)) + " Hz");
+    }
   }
   config.faults.push_back(fault);
 }

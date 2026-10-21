@@ -249,6 +249,23 @@ TEST(Config, RejectsBadFaults) {
   expect_error(j, "above 100000 Hz");
 }
 
+TEST(Config, RejectsCombinedRateFaultsAboveMaximum) {
+  auto j = example();
+  j["faults"] = {"rate:1:50", "rate:1:50"};  // 1 kHz x 2500
+  expect_error(j, "faults[1]");
+  j["faults"] = {"rate:1:50", "rate:2:50"};  // different sources: fine
+  EXPECT_NO_THROW(parse_config(j.dump()));
+}
+
+TEST(Config, HealthWindowsAreAtLeastOneMillisecond) {
+  auto j = example();
+  j["sources"][0]["health"] = {{"rate_window_ms", 0.00001}};
+  expect_error(j, "sources[0].health.rate_window_ms: must be at least 1");
+  j = example();
+  j["health"]["stale_min_ms"] = 0.5;
+  expect_error(j, "health.stale_min_ms: must be at least 1");
+}
+
 TEST(Config, AddFaultAppendsAfterLoading) {
   auto config = parse_config(example().dump());
   tstream::add_fault(config, "freeze:1@100+50");

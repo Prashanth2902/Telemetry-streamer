@@ -93,7 +93,8 @@ Config load_config(const std::string& path);
 
 // Parses one fault (fault.hpp syntax) and appends it to config.faults. Throws
 // ConfigError if it doesn't parse, names an unknown source, would push a
-// source past kMaxRateHz, or is slow_consumer (a tstream-recv fault).
+// source past kMaxRateHz together with its other rate faults, or is
+// slow_consumer (a tstream-recv fault).
 void add_fault(Config& config, std::string_view text);
 
 // Config spelling of a source type, e.g. "sim_imu".
