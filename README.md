@@ -50,13 +50,20 @@ recv summary samples=3043 batches=1006 gaps=0 out_of_order=0 batch_seq_gaps=0 fr
 recv source=1 samples=3008 gaps=0 out_of_order=0
 ```
 
-The sender prints a per-source summary and its transport counters; logs go to stderr:
+The sender prints a stats line every second (`--stats-interval`, 0 turns it off), then a per-source summary and its transport counters; logs go to stderr:
 
 ```
-summary source=1 type=sim_imu generated=3008 dropped=0 delivered=3008 lost=0 overruns=0
-summary total generated=3043 dropped=0 delivered=3043 lost=0 batches=1006
-summary transport batches_sent=1006 samples_sent=3043 bytes_sent=157747 batches_dropped=0 samples_dropped=0 connects=1 disconnects=0
+stats t=1.0s generated=1017 rate=1014/s ring_dropped=0 delivered=1016 batches=335 tx_sent=1016 tx_dropped=0 queued=0 queue_high_water=0 connects=1
+summary source=1 type=sim_imu generated=3009 dropped_newest=0 dropped_timeout=0 blocked=0 delivered=3009 tx_sent=3009 tx_dropped=0 lost=0 overruns=0
+summary total generated=3044 dropped=0 delivered=3044 tx_sent=3044 tx_dropped=0 lost=0 batches=1005
+summary transport batches_sent=1005 samples_sent=3044 bytes_sent=157775 batches_dropped=0 samples_dropped=0 queue_high_water=0 connects=1 disconnects=0
 ```
+
+Every sample is accounted for: per source, `generated` = ring drops (`dropped_newest` + `dropped_timeout`, by the source's `policy`) + `tx_dropped` (the transport's queue of `max_pending_batches` was full) + `tx_sent`. `lost` is whatever is left, and must be 0.
+
+### Forcing backpressure
+
+`tstream-recv --slow-consumer-ms 50 --slow-for 3` reads 1 KiB per 50 ms for its first 3 s, then catches up. With a small `transport.socket_send_buffer_bytes` (e.g. 8192) in the sender's config, its queue fills within a second and it starts dropping whole batches. Each dropped sample then shows up at the receiver as exactly one gap for that source: compare the sender's `summary source=N ... tx_dropped=` with the receiver's `recv source=N ... gaps=`.
 
 Without a receiver, `tstream --config configs/default.json --sink stdout` prints one line per batch instead of sending.
 
