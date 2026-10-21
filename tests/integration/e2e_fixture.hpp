@@ -30,32 +30,32 @@ inline const std::filesystem::path kDefaultConfig =
 
 using FieldMap = std::map<std::string, std::string>;
 
-// Every line starting with `prefix`, keyed by its "source" field.
-inline std::map<std::string, FieldMap> per_source(const std::string& out,
-                                                  const std::string& prefix) {
-  std::map<std::string, FieldMap> sources;
+// The fields of every line starting with `prefix`, in order.
+inline std::vector<FieldMap> lines_with_prefix(const std::string& out, const std::string& prefix) {
+  std::vector<FieldMap> lines;
   std::istringstream in(out);
   std::string line;
   while (std::getline(in, line)) {
     if (line.starts_with(prefix)) {
-      auto fields = key_values(line);
-      sources[fields["source"]] = std::move(fields);
+      lines.push_back(key_values(line));
     }
+  }
+  return lines;
+}
+
+// Every line starting with `prefix`, keyed by its "source" field.
+inline std::map<std::string, FieldMap> per_source(const std::string& out,
+                                                  const std::string& prefix) {
+  std::map<std::string, FieldMap> sources;
+  for (auto& fields : lines_with_prefix(out, prefix)) {
+    sources[fields["source"]] = std::move(fields);
   }
   return sources;
 }
 
 // The fields of every "health ..." line tstream-recv printed, in order.
 inline std::vector<FieldMap> health_lines(const std::string& recv_out) {
-  std::vector<FieldMap> events;
-  std::istringstream in(recv_out);
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.starts_with("health ")) {
-      events.push_back(key_values(line));
-    }
-  }
-  return events;
+  return lines_with_prefix(recv_out, "health ");
 }
 
 class SenderReceiverTest : public TempDirTest {
