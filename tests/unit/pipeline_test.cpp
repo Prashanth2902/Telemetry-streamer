@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -14,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "tstream/clock.hpp"
+#include "tstream/health.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
 
@@ -24,8 +26,10 @@ using ::testing::Field;
 using ::testing::SizeIs;
 using tstream::BatchConfig;
 using tstream::BatchView;
+using tstream::HealthData;
 using tstream::Pipeline;
 using tstream::Sample;
+using tstream::SampleKind;
 using tstream::SampleRing;
 
 // Copies every batch it receives. send() runs on the pipeline thread; tests
@@ -77,6 +81,47 @@ BatchConfig batch_config(std::size_t max_samples, std::uint32_t max_delay_us) {
   c.max_samples = max_samples;
   c.max_delay_us = max_delay_us;
   return c;
+}
+
+// Counts what it sees and raises `per_trigger` events (detail 0, 1, ...)
+// about source 1 when it sees source 1's sample with seq `trigger_seq`.
+// Pipeline thread only; tests read it after stop().
+class FakeMonitor final : public tstream::HealthMonitor {
+ public:
+  // Raises per_trigger events on seeing source 1's seq trigger_seq.
+  FakeMonitor(std::uint32_t trigger_seq, std::uint32_t per_trigger)
+      : trigger_seq_(trigger_seq), per_trigger_(per_trigger) {}
+
+  // Counts the sample and queues events on the trigger.
+  void on_sample(const Sample& sample, std::int64_t /*now_ns*/) override {
+    ++samples_seen;
+    if (sample.source_id == 1 && sample.seq == trigger_seq_) {
+      for (std::uint32_t i = 0; i < per_trigger_; ++i) {
+        static_cast<void>(queue_.push({.source_id = 1, .monitor = 2, .severity = 1, .detail = i}));
+      }
+    }
+  }
+  // Counts ticks.
+  void on_tick(std::int64_t /*now_ns*/) override { ++ticks; }
+  // Hands out queued events.
+  std::optional<HealthData> poll_event() override { return queue_.pop(); }
+
+  std::uint64_t samples_seen = 0;
+  std::uint64_t ticks = 0;
+
+ private:
+  std::uint32_t trigger_seq_;
+  std::uint32_t per_trigger_;
+  tstream::HealthEventQueue queue_;
+};
+
+// Every sample across all batches, in order.
+std::vector<Sample> flatten(const RecordingSink& sink) {
+  std::vector<Sample> out;
+  for (const auto& batch : sink.batches) {
+    out.insert(out.end(), batch.samples.begin(), batch.samples.end());
+  }
+  return out;
 }
 
 // Polls `done` every millisecond; false if it isn't true within timeout.
@@ -232,6 +277,85 @@ TEST(Pipeline, BoundedDrainInterleavesRings) {
   }
   ASSERT_TRUE(found);
   EXPECT_LE(position, 2 * Pipeline::kMaxDrainPerRing);
+}
+
+TEST(Pipeline, InjectsHealthEventsAfterTheTriggeringSample) {
+  const auto ring = tstream::make_sample_ring(64);
+  push_n(*ring, 1, 10);
+  RecordingSink sink;
+  FakeMonitor monitor(4, 1);
+  Pipeline pipeline({ring.get()}, batch_config(100, 10'000'000), sink, {&monitor});
+  pipeline.start();
+  pipeline.stop();
+
+  const std::vector<Sample> all = flatten(sink);
+  ASSERT_EQ(all.size(), 11U);
+  std::size_t trigger_at = all.size();
+  std::size_t health_at = all.size();
+  for (std::size_t i = 0; i < all.size(); ++i) {
+    if (all[i].source_id == 1 && all[i].seq == 4) {
+      trigger_at = i;
+    }
+    if (all[i].kind == SampleKind::Health) {
+      health_at = i;
+    }
+  }
+  ASSERT_LT(health_at, all.size());
+  EXPECT_GT(health_at, trigger_at);
+  const Sample& h = all[health_at];
+  EXPECT_EQ(h.source_id, tstream::kPipelineSourceId);
+  EXPECT_EQ(h.seq, 0U);
+  EXPECT_EQ(h.health.source_id, 1);
+  EXPECT_EQ(h.health.monitor, 2);
+  EXPECT_EQ(h.health.severity, 1);
+  EXPECT_GE(h.t_capture_ns, all[trigger_at].t_capture_ns);
+
+  EXPECT_EQ(monitor.samples_seen, 10U) << "health samples aren't fed back to monitors";
+  EXPECT_GT(monitor.ticks, 0U);
+  EXPECT_EQ(pipeline.health_events(), 1U);
+  EXPECT_EQ(pipeline.delivered(0), 10U) << "health samples aren't credited to a ring";
+}
+
+// Events that don't fit flush the full batch first; source 0's seq counts up.
+TEST(Pipeline, HealthEventsSpillIntoTheNextBatch) {
+  const auto ring = tstream::make_sample_ring(64);
+  push_n(*ring, 1, 3);
+  RecordingSink sink;
+  FakeMonitor monitor(0, 5);
+  Pipeline pipeline({ring.get()}, batch_config(4, 10'000'000), sink, {&monitor});
+  pipeline.start();
+  pipeline.stop();
+
+  ASSERT_EQ(sink.batches.size(), 2U);  // 3 data + 1 health, then 4 health
+  EXPECT_EQ(sink.batches[0].samples.size(), 4U);
+  EXPECT_EQ(sink.batches[1].samples.size(), 4U);
+  std::uint32_t next_seq = 0;
+  for (const Sample& s : flatten(sink)) {
+    if (s.kind == SampleKind::Health) {
+      EXPECT_EQ(s.seq, next_seq);
+      EXPECT_EQ(s.health.detail, next_seq);  // queue order kept
+      ++next_seq;
+    }
+  }
+  EXPECT_EQ(next_seq, 5U);
+  EXPECT_EQ(pipeline.health_events(), 5U);
+}
+
+TEST(Pipeline, EveryMonitorSeesEverySample) {
+  const auto ring_a = tstream::make_sample_ring(64);
+  const auto ring_b = tstream::make_sample_ring(64);
+  push_n(*ring_a, 1, 20);
+  push_n(*ring_b, 2, 30);
+  RecordingSink sink;
+  FakeMonitor first(99, 0);
+  FakeMonitor second(99, 0);
+  Pipeline pipeline({ring_a.get(), ring_b.get()}, batch_config(8, 10'000'000), sink,
+                    {&first, &second});
+  pipeline.start();
+  pipeline.stop();
+  EXPECT_EQ(first.samples_seen, 50U);
+  EXPECT_EQ(second.samples_seen, 50U);
+  EXPECT_EQ(pipeline.health_events(), 0U);
 }
 
 }  // namespace

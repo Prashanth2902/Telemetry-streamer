@@ -1,15 +1,20 @@
 #include "tstream/pipeline.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 #include <utility>
+
+#include "tstream/sample.hpp"
 
 namespace tstream {
 
 // All allocation happens here: batch storage and per-ring counters.
-Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, BatchSink& sink)
+Pipeline::Pipeline(std::vector<SampleRing*> rings, const BatchConfig& batch, BatchSink& sink,
+                   std::vector<HealthMonitor*> monitors)
     : rings_(std::move(rings)),
       sink_(sink),
+      monitors_(std::move(monitors)),
       batcher_(batch.max_samples, std::int64_t{batch.max_delay_us} * 1000),
       in_open_batch_(rings_.size(), 0),
       delivered_(std::make_unique<std::atomic<std::uint64_t>[]>(rings_.size())) {
@@ -49,6 +54,11 @@ std::uint64_t Pipeline::batches() const {
   return batches_.load(std::memory_order_relaxed);
 }
 
+// Relaxed for the same reason as delivered().
+std::uint64_t Pipeline::health_events() const {
+  return health_events_.load(std::memory_order_relaxed);
+}
+
 // The ring each pass starts from rotates, so no ring is always drained first.
 void Pipeline::run() {
   std::size_t first_ring = 0;
@@ -59,6 +69,7 @@ void Pipeline::run() {
 
     const std::size_t drained = drain_pass(first_ring);
     first_ring = (first_ring + 1) % rings_.size();
+    run_monitors();
 
     if (batcher_.due(now_ns())) {
       flush();
@@ -70,6 +81,7 @@ void Pipeline::run() {
       // whole pass finds nothing, then flush whatever is left.
       while (drain_pass(first_ring) > 0) {
       }
+      run_monitors();
       if (!batcher_.empty()) {
         flush();
       }
@@ -96,7 +108,13 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
       if (got == 0) {
         break;
       }
-      batcher_.commit(got, now_ns());
+      const std::int64_t now = now_ns();
+      for (HealthMonitor* monitor : monitors_) {
+        for (std::size_t i = 0; i < got; ++i) {
+          monitor->on_sample(batcher_.free_slots()[i], now);
+        }
+      }
+      batcher_.commit(got, now);
       in_open_batch_[index] += got;
       taken += got;
       if (batcher_.full()) {
@@ -106,6 +124,32 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
     total += taken;
   }
   return total;
+}
+
+// Events are drained every loop, so each queue only holds one loop's worth.
+// A full batch is flushed first, like in drain_pass().
+void Pipeline::run_monitors() {
+  if (monitors_.empty()) {
+    return;
+  }
+  const std::int64_t now = now_ns();
+  for (HealthMonitor* monitor : monitors_) {
+    monitor->on_tick(now);
+    while (const std::optional<HealthData> event = monitor->poll_event()) {
+      if (batcher_.full()) {
+        flush();
+      }
+      Sample& slot = *batcher_.free_slots();
+      slot = Sample{};
+      slot.source_id = kPipelineSourceId;
+      slot.kind = SampleKind::Health;
+      slot.seq = next_health_seq_++;
+      slot.t_capture_ns = now;
+      slot.health = *event;
+      batcher_.commit(1, now);
+      health_events_.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
 }
 
 // The view is only valid during send(), so counters are updated after it returns.
