@@ -20,6 +20,8 @@
 
 #include "tstream/clock.hpp"
 #include "tstream/config.hpp"
+#include "tstream/health.hpp"
+#include "tstream/monitors.hpp"
 #include "tstream/pipeline.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
@@ -163,7 +165,16 @@ int run(const Options& options) {
   } else {
     sink = std::make_unique<tstream::StdoutSink>();
   }
-  tstream::Pipeline pipeline(ring_ptrs, config.batch, *sink);
+  // Monitors start their clocks now, just before the sources do, so a source
+  // that never produces still goes stale.
+  const std::vector<tstream::SourceHealthThresholds> thresholds =
+      tstream::health_thresholds(config);
+  const std::int64_t start_ns = tstream::now_ns();
+  tstream::StaleMonitor stale(thresholds, start_ns);
+  tstream::RateMonitor rate(thresholds, start_ns);
+  tstream::SeqGapMonitor seq_gap(thresholds);
+  tstream::FrozenMonitor frozen(thresholds);
+  tstream::Pipeline pipeline(ring_ptrs, config.batch, *sink, {&stale, &rate, &seq_gap, &frozen});
 
   log_line("info", "starting {} sources (batch max_samples={} max_delay_us={})", sources.size(),
            config.batch.max_samples, config.batch.max_delay_us);
