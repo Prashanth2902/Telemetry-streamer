@@ -233,7 +233,7 @@ HealthConfig parse_health(const json& j) {
   require_object(j, where);
   reject_unknown_keys(j, where,
                       {"stale_periods", "stale_min_ms", "rate_tolerance_pct", "rate_window_ms",
-                       "rate_min_samples"});
+                       "rate_min_samples", "frozen_count"});
   HealthConfig h;
   if (j.contains("stale_periods")) {
     h.stale_periods = get_positive(j.at("stale_periods"), where + ".stale_periods");
@@ -250,6 +250,10 @@ HealthConfig parse_health(const json& j) {
   if (j.contains("rate_min_samples")) {
     h.rate_min_samples = static_cast<std::size_t>(
         get_integer(j.at("rate_min_samples"), where + ".rate_min_samples", 1, 1'000'000));
+  }
+  if (j.contains("frozen_count")) {
+    h.frozen_count = static_cast<std::size_t>(
+        get_integer(j.at("frozen_count"), where + ".frozen_count", 2, 1'000'000));
   }
   return h;
 }

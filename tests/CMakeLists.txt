@@ -38,6 +38,7 @@ tstream_add_test(encoder_test LABEL unit SOURCES unit/encoder_test.cpp)
 tstream_add_test(tcp_transport_test LABEL unit SOURCES unit/tcp_transport_test.cpp)
 tstream_add_test(receiver_test LABEL unit SOURCES unit/receiver_test.cpp)
 tstream_add_test(stats_test LABEL unit SOURCES unit/stats_test.cpp)
+tstream_add_test(health_test LABEL unit SOURCES unit/health_test.cpp)
 
 # Replaces global operator new, so it must be its own executable (SPEC §9).
 # Not built with sanitizers: they ship their own operator new (clang's static

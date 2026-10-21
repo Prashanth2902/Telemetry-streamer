@@ -64,6 +64,7 @@ struct HealthConfig {
   double rate_tolerance_pct = 20;
   double rate_window_ms = 1000;
   std::size_t rate_min_samples = 10;
+  std::size_t frozen_count = 20;  // identical payloads in a row before "frozen"
 };
 
 struct Config {

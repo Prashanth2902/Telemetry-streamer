@@ -4,6 +4,7 @@ add_library(tstream_core STATIC
   config.cpp
   encoder.cpp
   framing.cpp
+  health.cpp
   latency_histogram.cpp
   net.cpp
   pipeline.cpp
