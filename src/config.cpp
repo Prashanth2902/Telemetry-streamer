@@ -6,6 +6,7 @@
 #include <limits>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -271,7 +272,7 @@ Config parse_config(std::string_view json_text) {
 
   const std::string top = "config";
   require_object(root, top);
-  reject_unknown_keys(root, top, {"sources", "batch", "transport", "health", "seed"});
+  reject_unknown_keys(root, top, {"sources", "batch", "transport", "health", "seed", "faults"});
 
   Config config;
   const json& sources = require_key(root, top, "sources");
@@ -311,7 +312,50 @@ Config parse_config(std::string_view json_text) {
   }
   config.seed = get_integer(require_key(root, top, "seed"), "seed", 0,
                             std::numeric_limits<std::uint64_t>::max());
+  if (root.contains("faults")) {
+    const json& faults = root.at("faults");
+    if (!faults.is_array()) {
+      fail("faults", "must be an array of fault strings");
+    }
+    for (std::size_t i = 0; i < faults.size(); ++i) {
+      const std::string where = "faults[" + std::to_string(i) + "]";
+      const std::string text = get_string(faults[i], where);
+      try {
+        add_fault(config, text);
+      } catch (const ConfigError& e) {
+        fail(where, e.what());
+      }
+    }
+  }
   return config;
+}
+
+// Checked against the sources, so call it after they're parsed.
+void add_fault(Config& config, std::string_view text) {
+  Fault fault;
+  try {
+    fault = parse_fault(text);
+  } catch (const std::invalid_argument& e) {
+    throw ConfigError(e.what());
+  }
+  const std::string quoted = "fault \"" + std::string(text) + "\"";
+  if (fault.kind == FaultKind::SlowConsumer) {
+    fail(quoted, "slow_consumer is a receiver fault: pass it to tstream-recv --fault");
+  }
+  const SourceConfig* source = nullptr;
+  for (const SourceConfig& s : config.sources) {
+    if (s.id == fault.source_id) {
+      source = &s;
+    }
+  }
+  if (source == nullptr) {
+    fail(quoted, "no source with id " + std::to_string(fault.source_id));
+  }
+  if (fault.kind == FaultKind::Rate && source->rate_hz * fault.arg > kMaxRateHz) {
+    fail(quoted, "would run source " + std::to_string(fault.source_id) + " above " +
+                     std::to_string(static_cast<int>(kMaxRateHz)) + " Hz");
+  }
+  config.faults.push_back(fault);
 }
 
 // Reads the whole file, then parses it.

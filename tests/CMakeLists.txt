@@ -38,6 +38,7 @@ tstream_add_test(encoder_test LABEL unit SOURCES unit/encoder_test.cpp)
 tstream_add_test(tcp_transport_test LABEL unit SOURCES unit/tcp_transport_test.cpp)
 tstream_add_test(receiver_test LABEL unit SOURCES unit/receiver_test.cpp)
 tstream_add_test(stats_test LABEL unit SOURCES unit/stats_test.cpp)
+tstream_add_test(fault_test LABEL unit SOURCES unit/fault_test.cpp)
 tstream_add_test(health_test LABEL unit SOURCES unit/health_test.cpp)
 tstream_add_test(monitors_test LABEL unit SOURCES unit/monitors_test.cpp)
 

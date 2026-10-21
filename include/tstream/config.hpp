@@ -15,6 +15,8 @@
 #include <string_view>
 #include <vector>
 
+#include "tstream/fault.hpp"
+
 namespace tstream {
 
 class ConfigError : public std::runtime_error {
@@ -73,6 +75,7 @@ struct Config {
   TransportConfig transport;
   HealthConfig health;
   std::uint64_t seed = 0;
+  std::vector<Fault> faults;  // sender faults (SPEC §8), from "faults" and --fault
 };
 
 // Ring capacities SampleRing can be built with (powers of two in this range).
@@ -87,6 +90,11 @@ Config parse_config(std::string_view json_text);
 
 // Read a file and parse it. Throws ConfigError (including for I/O errors).
 Config load_config(const std::string& path);
+
+// Parses one fault (fault.hpp syntax) and appends it to config.faults. Throws
+// ConfigError if it doesn't parse, names an unknown source, would push a
+// source past kMaxRateHz, or is slow_consumer (a tstream-recv fault).
+void add_fault(Config& config, std::string_view text);
 
 // Config spelling of a source type, e.g. "sim_imu".
 std::string_view source_type_name(SourceType type);

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <exception>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,6 +20,7 @@
 #include <spdlog/fmt/fmt.h>
 
 #include "tstream/clock.hpp"
+#include "tstream/fault.hpp"
 #include "tstream/framing.hpp"
 #include "tstream/health.hpp"
 #include "tstream/latency_histogram.hpp"
@@ -36,7 +38,8 @@ struct Options {
 constexpr std::string_view kUsage =
     "usage: tstream-recv [--port N] [--bind ADDR] [--max-frame-bytes N]\n"
     "                    [--interval SECONDS] [--duration SECONDS]\n"
-    "                    [--slow-consumer-ms MS [--slow-for SECONDS]]\n"
+    "                    [--slow-consumer-ms MS | --fault slow_consumer:MS]\n"
+    "                    [--slow-for SECONDS]\n"
     "  Defaults: --port 9000 --bind 127.0.0.1 --max-frame-bytes 1048576 --interval 1\n"
     "  --port 0 picks a free port (printed on the first line).\n"
     "  --slow-consumer-ms reads 1 KiB per MS to force backpressure; --slow-for ends that.\n";
@@ -90,6 +93,18 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
       options.receiver.slow_read_delay = std::chrono::milliseconds(*ms);
+    } else if (arg == "--fault") {
+      // The one receiver-side fault (SPEC §8); same syntax as tstream's --fault.
+      try {
+        const tstream::Fault fault = tstream::parse_fault(value);
+        if (fault.kind != tstream::FaultKind::SlowConsumer) {
+          return std::nullopt;
+        }
+        options.receiver.slow_read_delay =
+            std::chrono::milliseconds(static_cast<std::int64_t>(fault.arg));
+      } catch (const std::invalid_argument&) {
+        return std::nullopt;
+      }
     } else if (arg == "--slow-for") {
       const auto seconds = parse_positive(value);
       if (!seconds) {
