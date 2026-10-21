@@ -82,6 +82,7 @@ struct Totals {
   std::uint64_t delivered = 0;
   std::uint64_t lost = 0;
   std::uint64_t batches = 0;
+  std::uint64_t health_events = 0;
 };
 
 // Parses the "summary total" line; found is false if there isn't one.
@@ -96,7 +97,8 @@ Totals parse_totals(const std::string& out) {
           .dropped = tstream::testing::field(fields, "dropped"),
           .delivered = tstream::testing::field(fields, "delivered"),
           .lost = tstream::testing::field(fields, "lost"),
-          .batches = tstream::testing::field(fields, "batches")};
+          .batches = tstream::testing::field(fields, "batches"),
+          .health_events = tstream::testing::field(fields, "health_events")};
 }
 
 // Sum of "batch N: M samples" lines, and how many there were.
@@ -123,9 +125,11 @@ void expect_clean_shutdown(const RunResult& r) {
   ASSERT_TRUE(totals.found) << "no summary line in stdout:\n" << r.out;
   EXPECT_EQ(totals.lost, 0U);
   EXPECT_EQ(totals.generated, totals.dropped + totals.delivered);
-  // Every delivered sample appears in a printed batch, and vice versa.
+  // Every delivered sample appears in a printed batch, and vice versa. Batches
+  // also carry health samples: under load the 1 kHz IMU can miss its 20 ms
+  // stale threshold.
   const auto [batch_samples, batch_lines] = sum_batch_lines(r.out);
-  EXPECT_EQ(batch_samples, totals.delivered);
+  EXPECT_EQ(batch_samples, totals.delivered + totals.health_events);
   EXPECT_EQ(batch_lines, totals.batches);
   EXPECT_THAT(r.err, HasSubstr("stopped cleanly"));
 }

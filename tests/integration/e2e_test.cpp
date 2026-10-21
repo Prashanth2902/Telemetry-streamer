@@ -125,6 +125,21 @@ TEST_F(E2eTest, TenSecondRunHasZeroGapsAndReportsLatency) {
       << recv_out;
 }
 
+// Per-source "summary source=" (sender) or "recv source=" (receiver) lines, by id.
+std::map<std::string, std::map<std::string, std::string>> per_source(const std::string& out,
+                                                                     const std::string& prefix) {
+  std::map<std::string, std::map<std::string, std::string>> sources;
+  std::istringstream in(out);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.starts_with(prefix)) {
+      auto fields = key_values(line);
+      sources[fields["source"]] = std::move(fields);
+    }
+  }
+  return sources;
+}
+
 // The sender starts first and keeps retrying; once the receiver appears it
 // connects. Batches sent before that are dropped and counted, not lost.
 TEST_F(E2eTest, SenderConnectsWhenReceiverStartsLater) {
@@ -145,14 +160,21 @@ TEST_F(E2eTest, SenderConnectsWhenReceiverStartsLater) {
   EXPECT_EQ(field(sent, "lost"), 0U);
   EXPECT_GT(field(transport, "batches_dropped"), 0U);
   EXPECT_GE(field(transport, "connects"), 1U);
+  // The transport also carries the pipeline's health samples (source 0).
   EXPECT_EQ(field(transport, "samples_sent") + field(transport, "samples_dropped"),
-            field(sent, "delivered"));
+            field(sent, "delivered") + field(sent, "health_events"));
   EXPECT_GT(field(recv, "samples"), 0U);
   EXPECT_EQ(field(recv, "samples"), field(transport, "samples_sent"));
   // The first K batches waited in the queue and arrived; the ones after them
   // were dropped until the connection opened. Those drops are exactly the
-  // receiver's gaps (SPEC §13 reconciliation).
-  EXPECT_EQ(field(recv, "gaps"), field(transport, "samples_dropped"));
+  // receiver's gaps (SPEC §13 reconciliation), source by source. Source 0
+  // is left out: a dropped trailing health sample is never seen as a gap.
+  const auto receiver_sources = per_source(recv_out, "recv source=");
+  for (const auto& [id, source] : per_source(send_out, "summary source=")) {
+    SCOPED_TRACE("source " + id);
+    ASSERT_TRUE(receiver_sources.contains(id));
+    EXPECT_EQ(field(receiver_sources.at(id), "gaps"), field(source, "tx_dropped"));
+  }
   EXPECT_EQ(field(recv, "batch_seq_gaps"), field(transport, "batches_dropped"));
 }
 
@@ -186,21 +208,6 @@ TEST_F(E2eTest, ReceiverRestartTriggersReconnect) {
   const std::uint64_t received = field(first_recv, "samples") + field(second_recv, "samples");
   EXPECT_LE(received, field(transport, "samples_sent"));
   EXPECT_GE(received + 600, field(transport, "samples_sent"));
-}
-
-// Per-source "summary source=" (sender) or "recv source=" (receiver) lines, by id.
-std::map<std::string, std::map<std::string, std::string>> per_source(const std::string& out,
-                                                                     const std::string& prefix) {
-  std::map<std::string, std::map<std::string, std::string>> sources;
-  std::istringstream in(out);
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.starts_with(prefix)) {
-      auto fields = key_values(line);
-      sources[fields["source"]] = std::move(fields);
-    }
-  }
-  return sources;
 }
 
 // Small socket buffers and a short queue, so a slow receiver backs the sender
@@ -275,7 +282,7 @@ TEST_F(E2eTest, StalledReceiverDoesNotBlockSender) {
   EXPECT_EQ(field(total, "lost"), 0U);
   EXPECT_GT(field(transport, "batches_dropped"), 0U);
   EXPECT_EQ(field(transport, "samples_sent") + field(transport, "samples_dropped"),
-            field(total, "delivered"));
+            field(total, "delivered") + field(total, "health_events"));
 }
 
 }  // namespace
