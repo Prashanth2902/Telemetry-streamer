@@ -86,18 +86,17 @@ struct Totals {
 
 // Parses the "summary total" line; found is false if there isn't one.
 Totals parse_totals(const std::string& out) {
-  static const std::regex kTotal(
-      R"(summary total generated=(\d+) dropped=(\d+) delivered=(\d+) lost=(\d+) batches=(\d+))");
-  std::smatch m;
-  if (!std::regex_search(out, m, kTotal)) {
+  const std::string line = tstream::testing::find_line(out, "summary total ");
+  if (line.empty()) {
     return {};
   }
+  const auto fields = tstream::testing::key_values(line);
   return {.found = true,
-          .generated = std::stoull(m[1]),
-          .dropped = std::stoull(m[2]),
-          .delivered = std::stoull(m[3]),
-          .lost = std::stoull(m[4]),
-          .batches = std::stoull(m[5])};
+          .generated = tstream::testing::field(fields, "generated"),
+          .dropped = tstream::testing::field(fields, "dropped"),
+          .delivered = tstream::testing::field(fields, "delivered"),
+          .lost = tstream::testing::field(fields, "lost"),
+          .batches = tstream::testing::field(fields, "batches")};
 }
 
 // Sum of "batch N: M samples" lines, and how many there were.
