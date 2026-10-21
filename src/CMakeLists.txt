@@ -10,6 +10,7 @@ add_library(tstream_core STATIC
   receiver.cpp
   sample_ring.cpp
   stdout_sink.cpp
+  stats.cpp
   stop_signal.cpp
   tcp_transport.cpp
   sources/fixed_rate_source.cpp
