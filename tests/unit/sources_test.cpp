@@ -1,5 +1,6 @@
 // SampleRing factory, simulated sensor models, and FixedRateSource.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "tstream/clock.hpp"
+#include "tstream/fault.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sim_models.hpp"
 #include "tstream/source.hpp"
@@ -148,10 +150,11 @@ class CountingModel final : public SampleModel {
 };
 
 // A FixedRateSource with id 9, driven by CountingModel.
-std::unique_ptr<FixedRateSource> make_counting_source(tstream::SampleRing& ring, double rate_hz,
-                                                      tstream::PushPolicy policy = {}) {
+std::unique_ptr<FixedRateSource> make_counting_source(
+    tstream::SampleRing& ring, double rate_hz, tstream::PushPolicy policy = {},
+    const std::vector<tstream::Fault>& faults = {}) {
   return std::make_unique<FixedRateSource>(9, "counting", rate_hz, ring,
-                                           std::make_unique<CountingModel>(), policy);
+                                           std::make_unique<CountingModel>(), policy, faults);
 }
 
 // block_with_timeout with the given timeout.
@@ -318,6 +321,85 @@ TEST(MakeSource, BuildsEachConfiguredType) {
     EXPECT_EQ(source->id(), 3);
     EXPECT_EQ(source->name(), tstream::source_type_name(type));
   }
+}
+
+// --- Faults -----------------------------------------------------------------
+
+// A stall shows up as a hole in capture times, not as a seq gap.
+TEST(FixedRateSourceFaults, StallPausesWithoutConsumingSeqs) {
+  const auto ring = tstream::make_sample_ring(1024);
+  auto source = make_counting_source(*ring, 500, {}, {tstream::parse_fault("stall:9:200@50")});
+  source->start();
+  std::this_thread::sleep_for(400ms);
+  source->stop();
+
+  const auto samples = drain(*ring);
+  ASSERT_GT(samples.size(), 20U);
+  std::int64_t longest_hole = 0;
+  for (std::size_t i = 1; i < samples.size(); ++i) {
+    ASSERT_EQ(samples[i].seq, samples[i - 1].seq + 1);
+    longest_hole = std::max(longest_hole, samples[i].t_capture_ns - samples[i - 1].t_capture_ns);
+  }
+  EXPECT_GE(longest_hole, 190'000'000);
+  EXPECT_EQ(source->counters().overruns, 0U) << "resuming after a stall isn't an overrun";
+}
+
+TEST(FixedRateSourceFaults, BurstOverflowsTheRing) {
+  const auto ring = tstream::make_sample_ring(16);  // nobody drains it
+  auto source = make_counting_source(*ring, 10, {}, {tstream::parse_fault("burst:9:100@0")});
+  source->start();
+  std::this_thread::sleep_for(50ms);
+  source->stop();
+  const auto counters = source->counters();
+  EXPECT_GE(counters.generated, 101U);  // the first sample, then the burst
+  EXPECT_EQ(counters.dropped_newest, counters.generated - 16);
+}
+
+TEST(FixedRateSourceFaults, FreezeRepeatsThePayloadWithNewSeqs) {
+  const auto ring = tstream::make_sample_ring(1024);
+  auto source = make_counting_source(*ring, 1000, {}, {tstream::parse_fault("freeze:9@20+50")});
+  source->start();
+  std::this_thread::sleep_for(150ms);
+  source->stop();
+
+  const auto samples = drain(*ring);
+  ASSERT_GT(samples.size(), 1U);
+  // CountingModel's payload is the sim time, so it changes on every sample
+  // unless frozen. Find the longest run of identical payloads.
+  std::size_t run = 1;
+  std::size_t longest = 1;
+  for (std::size_t i = 1; i < samples.size(); ++i) {
+    EXPECT_EQ(samples[i].seq, samples[i - 1].seq + 1);
+    EXPECT_EQ(samples[i].source_id, 9);
+    run = samples[i].imu.ax == samples[i - 1].imu.ax ? run + 1 : 1;
+    longest = std::max(longest, run);
+  }
+  EXPECT_GE(longest, 20U);  // ~50 ms at 1 kHz; slack for sanitizers
+  EXPECT_NE(samples.front().imu.ax, samples.back().imu.ax) << "the freeze ended";
+}
+
+TEST(FixedRateSourceFaults, RateFactorScalesProduction) {
+  const auto ring_normal = tstream::make_sample_ring(1024);
+  const auto ring_slow = tstream::make_sample_ring(1024);
+  auto normal = make_counting_source(*ring_normal, 500);
+  auto slow = make_counting_source(*ring_slow, 500, {}, {tstream::parse_fault("rate:9:0.25")});
+  normal->start();
+  slow->start();
+  std::this_thread::sleep_for(400ms);
+  normal->stop();
+  slow->stop();
+  const double ratio = static_cast<double>(slow->counters().generated) /
+                       static_cast<double>(normal->counters().generated);
+  EXPECT_NEAR(ratio, 0.25, 0.1);
+}
+
+TEST(FixedRateSourceFaults, IgnoresFaultsForOtherSources) {
+  const auto ring = tstream::make_sample_ring(1024);
+  auto source = make_counting_source(*ring, 500, {}, {tstream::parse_fault("stall:4:10000")});
+  source->start();
+  std::this_thread::sleep_for(100ms);
+  source->stop();
+  EXPECT_GT(source->counters().generated, 20U);
 }
 
 }  // namespace
