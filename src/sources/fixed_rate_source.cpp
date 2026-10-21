@@ -173,7 +173,7 @@ std::optional<std::int64_t> FixedRateSource::stall_end_at(std::int64_t elapsed_n
   std::optional<std::int64_t> end;
   for (const Fault& f : faults_) {
     if (f.kind == FaultKind::Stall && f.active_at(elapsed_ns)) {
-      end = std::max(end.value_or(0), *f.end_ns());
+      end = std::max(end.value_or(0), f.end_ns().value_or(elapsed_ns));  // a stall always ends
     }
   }
   return end;

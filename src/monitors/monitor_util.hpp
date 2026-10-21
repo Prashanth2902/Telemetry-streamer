@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "tstream/health.hpp"
@@ -40,7 +41,7 @@ inline std::uint32_t clamp_detail(std::int64_t value) {
   if (value < 0) {
     return 0;
   }
-  return value > 0xFFFF'FFFF ? 0xFFFF'FFFFU : static_cast<std::uint32_t>(value);
+  return std::cmp_greater(value, 0xFFFF'FFFFU) ? 0xFFFF'FFFFU : static_cast<std::uint32_t>(value);
 }
 
 }  // namespace tstream::detail

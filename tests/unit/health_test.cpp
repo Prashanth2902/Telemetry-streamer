@@ -45,9 +45,11 @@ TEST(HealthEventQueue, FifoAndBoundedWithOverflowCount) {
   }
   EXPECT_EQ(queue.overflowed(), 2U);
   for (std::uint32_t i = 0; i < 3; ++i) {
-    const auto e = queue.pop();
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->detail, i);
+    if (const auto e = queue.pop()) {
+      EXPECT_EQ(e->detail, i);
+    } else {
+      ADD_FAILURE() << "queue empty at " << i;
+    }
   }
   EXPECT_FALSE(queue.pop().has_value());
   EXPECT_TRUE(queue.push(event(9)));  // room again after draining

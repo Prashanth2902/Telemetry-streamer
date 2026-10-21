@@ -3,8 +3,8 @@
 
 #include "tstream/monitors.hpp"
 
+#include <algorithm>
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -178,14 +178,9 @@ TEST(RateMonitor, RaisesOnHalfRateAndClearsOnRecovery) {
   std::int64_t time = feed(m, 1, 0, 100, 0, 10 * kMs);  // 1 s at 100 Hz
   time = feed(m, 1, 100, 100, time, 20 * kMs);          // 2 s at 50 Hz
   auto events = drain(m);
-  std::optional<HealthData> raised;
-  for (const auto& e : events) {
-    if (e.source_id == 1) {
-      raised = e;
-      break;
-    }
-  }
-  ASSERT_TRUE(raised.has_value());
+  const auto raised =
+      std::ranges::find_if(events, [](const HealthData& e) { return e.source_id == 1; });
+  ASSERT_NE(raised, events.end());
   expect_event(*raised, 1, HealthMonitorKind::Rate, HealthSeverity::Warning);
   // Raised as the sliding window first leaves ±20%, on its way down to 50 Hz.
   EXPECT_LT(raised->detail, 80'000U);  // millihertz
