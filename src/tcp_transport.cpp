@@ -327,7 +327,7 @@ void TcpTransport::update_interest() {
 
 // O(samples + sources) and no allocation: tally_ is sized at construction.
 void TcpTransport::tally(const BatchView& batch) {
-  std::fill(tally_.begin(), tally_.end(), 0U);
+  std::ranges::fill(tally_, 0U);
   for (const Sample& sample : batch.samples) {
     ++tally_[index_of(sample.source_id)];
   }
@@ -340,7 +340,7 @@ void TcpTransport::enqueue(std::span<const std::byte> bytes, std::size_t samples
   frame.size = bytes.size();
   frame.offset = 0;
   frame.samples = samples;
-  std::copy(tally_.begin(), tally_.end(), frame.per_source.begin());
+  std::ranges::copy(tally_, frame.per_source.begin());
   ++count_;
   queued_.store(count_, std::memory_order_relaxed);
   raise_to(queue_high_water_, count_);

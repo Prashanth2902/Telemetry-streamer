@@ -89,7 +89,7 @@ std::optional<Options> parse_args(int argc, char** argv) {
       if (!seconds || *seconds == 0) {
         return std::nullopt;
       }
-      options.duration_s = *seconds;
+      options.duration_s = seconds;
     } else if (arg == "--stats-interval" && has_value) {
       const auto seconds = parse_seconds(argv[++i]);
       if (!seconds) {

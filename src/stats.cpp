@@ -87,6 +87,7 @@ std::string format_stats_line(const SenderStats& now, const SenderStats& previou
 std::vector<std::string> format_summary(const SenderStats& final_stats) {
   const bool tcp = final_stats.transport.has_value();
   std::vector<std::string> lines;
+  lines.reserve(final_stats.sources.size() + 2);  // per source, total, transport
   for (const SourceStats& s : final_stats.sources) {
     lines.push_back(fmt::format(
         "summary source={} type={} generated={} dropped_newest={} dropped_timeout={} blocked={} "
