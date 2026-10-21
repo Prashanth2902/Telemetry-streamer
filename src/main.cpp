@@ -57,6 +57,16 @@ constexpr std::string_view kUsage =
     "  --sink tcp (default) sends to transport.host:port; stdout prints one line per batch.\n"
     "  --stats-interval (default 1) prints a stats line that often; 0 turns it off.\n";
 
+// A non-negative number of seconds; nullopt for anything else, including "".
+std::optional<double> parse_seconds(const char* text) {
+  char* end = nullptr;
+  const double seconds = std::strtod(text, &end);
+  if (end == text || *end != '\0' || !(seconds >= 0)) {
+    return std::nullopt;
+  }
+  return seconds;
+}
+
 // Parses the options above; nullopt on any malformed or unknown argument.
 std::optional<Options> parse_args(int argc, char** argv) {
   Options options;
@@ -75,19 +85,17 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
     } else if (arg == "--duration" && has_value) {
-      char* end = nullptr;
-      const double seconds = std::strtod(argv[++i], &end);
-      if (end == nullptr || *end != '\0' || !(seconds > 0)) {
+      const auto seconds = parse_seconds(argv[++i]);
+      if (!seconds || *seconds == 0) {
         return std::nullopt;
       }
-      options.duration_s = seconds;
+      options.duration_s = *seconds;
     } else if (arg == "--stats-interval" && has_value) {
-      char* end = nullptr;
-      const double seconds = std::strtod(argv[++i], &end);
-      if (end == nullptr || *end != '\0' || !(seconds >= 0)) {
+      const auto seconds = parse_seconds(argv[++i]);
+      if (!seconds) {
         return std::nullopt;
       }
-      options.stats_interval_s = seconds;
+      options.stats_interval_s = *seconds;
     } else {
       return std::nullopt;
     }

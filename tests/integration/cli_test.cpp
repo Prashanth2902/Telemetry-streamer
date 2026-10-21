@@ -185,6 +185,10 @@ TEST_F(CliTest, BadArgumentsPrintUsage) {
                                              {"--config"},
                                              {"--duration", "1"},
                                              {"--config", "x", "--duration", "-1"},
+                                             {"--config", "x", "--duration", ""},
+                                             {"--config", "x", "--duration", "0"},
+                                             {"--config", "x", "--stats-interval", "-1"},
+                                             {"--config", "x", "--stats-interval", "fast"},
                                              {"--config", "x", "--sink", "bogus"},
                                              {"--bogus"}}) {
     const auto r = run(args);
