@@ -24,8 +24,7 @@ class ConfigError : public std::runtime_error {
 
 enum class SourceType : std::uint8_t { SimImu, SimGps, SimBattery };
 
-// Backpressure policy when a source's ring is full (SPEC §6). Parsed and
-// validated now; enforced from M4. Until then sources drop the newest sample.
+// Backpressure policy when a source's ring is full (SPEC §6); see PushPolicy.
 enum class BackpressurePolicy : std::uint8_t { DropNewest, BlockWithTimeout };
 
 // Per-source absolute overrides of the global health defaults (SPEC §7, §10).
@@ -55,6 +54,7 @@ struct TransportConfig {
   std::uint16_t port = 0;
   std::size_t max_pending_batches = 0;
   std::size_t max_frame_bytes = 1 << 20;
+  std::size_t socket_send_buffer_bytes = 0;  // SO_SNDBUF; 0 keeps the kernel default
 };
 
 // Defaults expressed relative to each source's period (SPEC §7).
@@ -78,6 +78,8 @@ struct Config {
 inline constexpr std::size_t kMinRingCapacity = 16;
 inline constexpr std::size_t kMaxRingCapacity = 65536;
 inline constexpr double kMaxRateHz = 100'000;
+// Cap on the transport's preallocated queue: K slots x the worst-case frame.
+inline constexpr std::size_t kMaxQueueBytes = std::size_t{256} << 20;
 
 // Parse and validate JSON text. Throws ConfigError.
 Config parse_config(std::string_view json_text);

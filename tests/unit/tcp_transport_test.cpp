@@ -177,17 +177,83 @@ TEST(TcpTransport, SendsFramesThatDecodeOnTheReceiver) {
   EXPECT_EQ(c.connects, 1U);
 }
 
-TEST(TcpTransport, DropsAndCountsWhileNoReceiver) {
-  TcpTransport transport(options_for(free_port()));
-  const auto samples = imu_samples(7);
-  for (std::uint64_t seq = 0; seq < 3; ++seq) {
+// A batch mixing two sources: 4 samples from source 1, 2 from source 2.
+std::vector<Sample> mixed_batch() {
+  auto samples = imu_samples(6);
+  for (std::size_t i = 4; i < 6; ++i) {
+    samples[i].source_id = 2;
+  }
+  return samples;
+}
+
+// SPEC §6: with no receiver, the first K batches wait in the queue; beyond K
+// the new batch is dropped whole and counted per source.
+TEST(TcpTransport, QueuesUpToKThenDropsAndCountsPerSource) {
+  auto options = options_for(free_port());
+  options.max_pending_batches = 3;
+  options.source_ids = {1, 2};
+  TcpTransport transport(options);
+  const auto samples = mixed_batch();
+  for (std::uint64_t seq = 0; seq < 5; ++seq) {
     transport.send(BatchView{.batch_seq = seq, .t_flush_ns = 0, .samples = samples});
   }
   const auto c = transport.counters();
   EXPECT_FALSE(transport.connected());
   EXPECT_EQ(c.batches_sent, 0U);
+  EXPECT_EQ(c.queued, 3U);
+  EXPECT_EQ(c.queue_high_water, 3U);
+  EXPECT_EQ(c.batches_dropped, 2U);
+  EXPECT_EQ(c.samples_dropped, 12U);
+  EXPECT_EQ(transport.samples_dropped_for(1), 8U);
+  EXPECT_EQ(transport.samples_dropped_for(2), 4U);
+  EXPECT_EQ(transport.samples_dropped_for(77), 0U);  // unconfigured id: the "other" bucket
+}
+
+// Batches queued while disconnected go out, in order, once a receiver appears.
+TEST(TcpTransport, DeliversQueuedBatchesAfterConnecting) {
+  const std::uint16_t port = free_port();
+  auto options = options_for(port);
+  options.source_ids = {1, 2};
+  TcpTransport transport(options);
+  const auto samples = mixed_batch();
+  for (std::uint64_t seq = 0; seq < 4; ++seq) {
+    transport.send(BatchView{.batch_seq = seq, .t_flush_ns = 0, .samples = samples});
+  }
+  EXPECT_EQ(transport.counters().queued, 4U);
+
+  const Listener listener(port);
+  ASSERT_TRUE(poll_until(transport, [&] { return transport.counters().queued == 0; }));
+  const int peer = listener.accept();
+  ASSERT_GE(peer, 0);
+  transport.close();
+
+  const auto batches = decode_stream(read_all(peer));
+  ASSERT_EQ(batches.size(), 4U);
+  for (std::size_t i = 0; i < batches.size(); ++i) {
+    EXPECT_EQ(batches[i].batch_seq(), i);
+  }
+  EXPECT_EQ(transport.counters().batches_dropped, 0U);
+  EXPECT_EQ(transport.samples_sent_for(1), 16U);
+  EXPECT_EQ(transport.samples_sent_for(2), 8U);
+}
+
+// Nothing ever connects: close() gives up after its timeout and counts every
+// queued batch as dropped, so nothing disappears unaccounted.
+TEST(TcpTransport, CloseCountsUndeliveredQueueAsDropped) {
+  auto options = options_for(free_port());
+  options.close_flush_timeout = 100ms;
+  TcpTransport transport(options);
+  const auto samples = imu_samples(5);
+  for (std::uint64_t seq = 0; seq < 3; ++seq) {
+    transport.send(BatchView{.batch_seq = seq, .t_flush_ns = 0, .samples = samples});
+  }
+  const auto before = std::chrono::steady_clock::now();
+  transport.close();
+  EXPECT_LT(std::chrono::steady_clock::now() - before, 1s);
+  const auto c = transport.counters();
+  EXPECT_EQ(c.queued, 0U);
   EXPECT_EQ(c.batches_dropped, 3U);
-  EXPECT_EQ(c.samples_dropped, 21U);
+  EXPECT_EQ(c.samples_dropped, 15U);
 }
 
 TEST(TcpTransport, ConnectsOnceReceiverAppears) {
@@ -234,7 +300,9 @@ TEST(TcpTransport, PartialWritesCompleteAndCloseFlushesPending) {
   constexpr std::uint64_t kBatches = 100;
   constexpr std::size_t kSamples = 4096;  // ~200 KB per frame, ~20 MB in total
   const Listener listener;
-  TcpTransport transport(options_for(listener.port(), kSamples));
+  auto options = options_for(listener.port(), kSamples);
+  options.max_pending_batches = 4;  // small, so ~20 MB overflows the queue for sure
+  TcpTransport transport(options);
   ASSERT_TRUE(poll_until(transport, [&] { return transport.connected(); }));
   const int peer = listener.accept();
   ASSERT_GE(peer, 0);

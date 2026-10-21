@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <sched.h>
 
+#include "tstream/cpu_relax.hpp"
 #include "tstream/spsc_ring.hpp"
 
 #include "baseline_queues.hpp"
@@ -31,6 +32,7 @@
 namespace {
 
 using tstream::BasicSpscRing;
+using tstream::cpu_relax;
 using tstream::SpscRing;
 using tstream::SpscRingOptions;
 using tstream::bench::MutexDequeQueue;
@@ -40,12 +42,6 @@ constexpr std::size_t kCapacity = 1024;
 constexpr std::uint64_t kItemsPerIter = 1 << 16;
 
 // Spin-wait hint (x86 PAUSE): eases pressure on the sibling hyperthread and the memory bus.
-inline void cpu_relax() {
-#if defined(__x86_64__) || defined(__i386__)
-  __builtin_ia32_pause();
-#endif
-}
-
 // Parsed once from TSTREAM_BENCH_CPUS="<producer>,<consumer>".
 std::optional<std::pair<std::size_t, std::size_t>> bench_cpus() {
   static const auto cpus = []() -> std::optional<std::pair<std::size_t, std::size_t>> {

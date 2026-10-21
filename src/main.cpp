@@ -24,6 +24,7 @@
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
 #include "tstream/source.hpp"
+#include "tstream/stats.hpp"
 #include "tstream/stop_signal.hpp"
 #include "tstream/tcp_transport.hpp"
 
@@ -46,14 +47,27 @@ struct Options {
   std::string config_path;
   std::optional<double> duration_s;
   SinkKind sink = SinkKind::Tcp;
+  double stats_interval_s = 1.0;  // 0 turns the periodic stats line off
 };
 
 constexpr std::string_view kUsage =
     "usage: tstream --config <path> [--duration <seconds>] [--sink tcp|stdout]\n"
+    "               [--stats-interval <seconds>]\n"
     "  Runs until SIGINT/SIGTERM, or for --duration seconds.\n"
-    "  --sink tcp (default) sends to transport.host:port; stdout prints one line per batch.\n";
+    "  --sink tcp (default) sends to transport.host:port; stdout prints one line per batch.\n"
+    "  --stats-interval (default 1) prints a stats line that often; 0 turns it off.\n";
 
-// Parses --config, --duration, and --sink; nullopt on any malformed or unknown argument.
+// A non-negative number of seconds; nullopt for anything else, including "".
+std::optional<double> parse_seconds(const char* text) {
+  char* end = nullptr;
+  const double seconds = std::strtod(text, &end);
+  if (end == text || *end != '\0' || !(seconds >= 0)) {
+    return std::nullopt;
+  }
+  return seconds;
+}
+
+// Parses the options above; nullopt on any malformed or unknown argument.
 std::optional<Options> parse_args(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
@@ -71,12 +85,17 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
     } else if (arg == "--duration" && has_value) {
-      char* end = nullptr;
-      const double seconds = std::strtod(argv[++i], &end);
-      if (end == nullptr || *end != '\0' || !(seconds > 0)) {
+      const auto seconds = parse_seconds(argv[++i]);
+      if (!seconds || *seconds == 0) {
         return std::nullopt;
       }
       options.duration_s = seconds;
+    } else if (arg == "--stats-interval" && has_value) {
+      const auto seconds = parse_seconds(argv[++i]);
+      if (!seconds) {
+        return std::nullopt;
+      }
+      options.stats_interval_s = *seconds;
     } else {
       return std::nullopt;
     }
@@ -87,53 +106,28 @@ std::optional<Options> parse_args(int argc, char** argv) {
   return options;
 }
 
-// Blocks until a stop signal arrives or duration_s has elapsed.
-void wait_for_stop(std::optional<double> duration_s) {
+// Blocks until a stop signal arrives or duration_s has elapsed, printing a
+// stats line every stats_interval_s along the way.
+void wait_for_stop(const Options& options,
+                   const std::vector<std::unique_ptr<tstream::Source>>& sources,
+                   const tstream::Pipeline& pipeline, const tstream::TcpTransport* transport) {
   const auto start = tstream::Clock::now();
+  tstream::SenderStats previous;
+  double next_report_s = options.stats_interval_s;
   while (!tstream::stop_requested()) {
-    if (duration_s &&
-        std::chrono::duration<double>(tstream::Clock::now() - start).count() >= *duration_s) {
+    const double elapsed_s = std::chrono::duration<double>(tstream::Clock::now() - start).count();
+    if (options.stats_interval_s > 0 && elapsed_s >= next_report_s) {
+      tstream::SenderStats now = tstream::collect_stats(elapsed_s, sources, pipeline, transport);
+      fmt::print("{}\n", tstream::format_stats_line(now, previous));
+      std::fflush(stdout);
+      previous = std::move(now);
+      next_report_s += options.stats_interval_s;
+    }
+    if (options.duration_s && elapsed_s >= *options.duration_s) {
       return;
     }
     std::this_thread::sleep_for(10ms);
   }
-}
-
-// Prints one line per source and a total, and returns the number of samples
-// that are neither delivered nor counted as dropped. Must be 0.
-std::uint64_t print_summary(const std::vector<std::unique_ptr<tstream::Source>>& sources,
-                            const tstream::Pipeline& pipeline) {
-  std::uint64_t total_generated = 0;
-  std::uint64_t total_dropped = 0;
-  std::uint64_t total_delivered = 0;
-  for (std::size_t i = 0; i < sources.size(); ++i) {
-    const auto counters = sources[i]->counters();
-    const std::uint64_t delivered = pipeline.delivered(i);
-    const std::uint64_t lost = counters.generated - counters.dropped - delivered;
-    fmt::print(
-        "summary source={} type={} generated={} dropped={} delivered={} lost={} overruns={}\n",
-        sources[i]->id(), sources[i]->name(), counters.generated, counters.dropped, delivered, lost,
-        counters.overruns);
-    total_generated += counters.generated;
-    total_dropped += counters.dropped;
-    total_delivered += delivered;
-  }
-  const std::uint64_t total_lost = total_generated - total_dropped - total_delivered;
-  fmt::print("summary total generated={} dropped={} delivered={} lost={} batches={}\n",
-             total_generated, total_dropped, total_delivered, total_lost, pipeline.batches());
-  std::fflush(stdout);
-  return total_lost;
-}
-
-// One line of transport counters. Batches the transport dropped were already
-// delivered to the sink, so they appear here rather than as `lost`.
-void print_transport_summary(const tstream::TransportCounters& c) {
-  fmt::print(
-      "summary transport batches_sent={} samples_sent={} bytes_sent={} batches_dropped={} "
-      "samples_dropped={} connects={} disconnects={}\n",
-      c.batches_sent, c.samples_sent, c.bytes_sent, c.batches_dropped, c.samples_dropped,
-      c.connects, c.disconnects);
-  std::fflush(stdout);
 }
 
 // Builds everything from the config, runs it, shuts down in order; returns the exit code.
@@ -144,10 +138,6 @@ int run(const Options& options) {
   std::vector<std::unique_ptr<tstream::Source>> sources;
   std::vector<tstream::SampleRing*> ring_ptrs;
   for (const auto& source_config : config.sources) {
-    if (source_config.policy != tstream::BackpressurePolicy::DropNewest) {
-      log_line("warn", "source {}: policy {} is enforced from M4; using drop_newest for now",
-               source_config.id, tstream::policy_name(source_config.policy));
-    }
     rings.push_back(tstream::make_sample_ring(source_config.ring_capacity));
     ring_ptrs.push_back(rings.back().get());
     sources.push_back(tstream::make_source(source_config, *rings.back(), config.seed));
@@ -160,6 +150,12 @@ int run(const Options& options) {
     transport_options.host = config.transport.host;
     transport_options.port = config.transport.port;
     transport_options.max_samples = config.batch.max_samples;
+    transport_options.max_pending_batches = config.transport.max_pending_batches;
+    transport_options.socket_send_buffer_bytes =
+        static_cast<int>(config.transport.socket_send_buffer_bytes);
+    for (const auto& source_config : config.sources) {
+      transport_options.source_ids.push_back(source_config.id);
+    }
     auto tcp = std::make_unique<tstream::TcpTransport>(transport_options);
     transport = tcp.get();
     sink = std::move(tcp);
@@ -176,7 +172,7 @@ int run(const Options& options) {
     source->start();
   }
 
-  wait_for_stop(options.duration_s);
+  wait_for_stop(options, sources, pipeline, transport);
 
   // Shutdown order (SPEC §3.2): stop producing, then drain and flush, then
   // close the sink.
@@ -187,10 +183,13 @@ int run(const Options& options) {
   pipeline.stop();
   sink->close();
 
-  const std::uint64_t lost = print_summary(sources, pipeline);
-  if (transport != nullptr) {
-    print_transport_summary(transport->counters());
+  // Every counter is final now, so the accounting below is exact.
+  const tstream::SenderStats final_stats = tstream::collect_stats(0, sources, pipeline, transport);
+  for (const std::string& line : tstream::format_summary(final_stats)) {
+    fmt::print("{}\n", line);
   }
+  std::fflush(stdout);
+  const std::uint64_t lost = tstream::total_lost(final_stats);
   if (lost != 0) {
     log_line("error", "{} samples unaccounted for", lost);
     return 3;

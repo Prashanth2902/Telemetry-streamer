@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "tstream/cpu_relax.hpp"
 #include "tstream/source.hpp"
 
 namespace tstream {
@@ -21,13 +22,15 @@ Clock::duration period_for(double rate_hz) {
 
 // Only stores configuration; the thread starts in start().
 FixedRateSource::FixedRateSource(std::uint16_t id, std::string_view name, double rate_hz,
-                                 SampleRing& ring, std::unique_ptr<SampleModel> model)
+                                 SampleRing& ring, std::unique_ptr<SampleModel> model,
+                                 PushPolicy push_policy)
     : id_(id),
       name_(name),
       rate_hz_(rate_hz),
       period_(period_for(rate_hz)),
       ring_(ring),
-      model_(std::move(model)) {}
+      model_(std::move(model)),
+      push_policy_(push_policy) {}
 
 // Joins the thread if the owner didn't call stop().
 FixedRateSource::~FixedRateSource() {
@@ -51,10 +54,12 @@ void FixedRateSource::stop() {
   }
 }
 
-// Relaxed loads of the three counters.
+// Relaxed loads of each counter.
 SourceCounters FixedRateSource::counters() const {
   return {.generated = generated_.load(std::memory_order_relaxed),
-          .dropped = dropped_.load(std::memory_order_relaxed),
+          .dropped_newest = dropped_newest_.load(std::memory_order_relaxed),
+          .dropped_timeout = dropped_timeout_.load(std::memory_order_relaxed),
+          .blocked = blocked_.load(std::memory_order_relaxed),
           .overruns = overruns_.load(std::memory_order_relaxed)};
 }
 
@@ -73,10 +78,7 @@ void FixedRateSource::run() {
     ++seq;  // consumed whether or not the push succeeds
 
     generated_.fetch_add(1, std::memory_order_relaxed);
-    if (!ring_.try_push(sample)) {
-      // drop_newest until M4 adds per-source policies (SPEC §6).
-      dropped_.fetch_add(1, std::memory_order_relaxed);
-    }
+    static_cast<void>(push(sample));  // drops are counted inside push()
 
     next += period_;
     const auto now = Clock::now();
@@ -88,6 +90,35 @@ void FixedRateSource::run() {
     }
     sleep_until_or_stop(next);
   }
+}
+
+// The fast path is one try_push. Blocking checks the clock on every retry,
+// which is cheap next to the yield, and stops waiting once stop() is called.
+bool FixedRateSource::push(const Sample& sample) {
+  if (ring_.try_push(sample)) {
+    return true;
+  }
+  if (push_policy_.policy == BackpressurePolicy::DropNewest) {
+    dropped_newest_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  const auto deadline = Clock::now() + push_policy_.timeout;
+  for (int attempt = 0; !stop_requested_.load(std::memory_order_relaxed); ++attempt) {
+    if (attempt < kSpinsBeforeYield) {
+      cpu_relax();
+    } else {
+      std::this_thread::yield();
+    }
+    if (ring_.try_push(sample)) {
+      blocked_.fetch_add(1, std::memory_order_relaxed);
+      return true;
+    }
+    if (Clock::now() >= deadline) {
+      break;
+    }
+  }
+  dropped_timeout_.fetch_add(1, std::memory_order_relaxed);
+  return false;
 }
 
 // Wakes at least every kStopPollInterval to check the stop flag.
@@ -117,8 +148,12 @@ std::unique_ptr<Source> make_source(const SourceConfig& config, SampleRing& ring
       model = std::make_unique<SimBatteryModel>(source_seed);
       break;
   }
+  const PushPolicy push_policy{
+      .policy = config.policy,
+      .timeout = std::chrono::microseconds(config.timeout_us.value_or(0)),
+  };
   return std::make_unique<FixedRateSource>(config.id, source_type_name(config.type), config.rate_hz,
-                                           ring, std::move(model));
+                                           ring, std::move(model), push_policy);
 }
 
 }  // namespace tstream

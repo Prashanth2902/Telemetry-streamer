@@ -19,9 +19,20 @@
 namespace tstream {
 
 struct SourceCounters {
-  std::uint64_t generated = 0;  // samples created (each consumed one seq)
-  std::uint64_t dropped = 0;    // rejected because the ring was full
-  std::uint64_t overruns = 0;   // times the thread fell a full period behind
+  std::uint64_t generated = 0;        // samples created (each consumed one seq)
+  std::uint64_t dropped_newest = 0;   // drop_newest: rejected because the ring was full
+  std::uint64_t dropped_timeout = 0;  // block_with_timeout: still full after timeout_us
+  std::uint64_t blocked = 0;          // block_with_timeout: waited, then got in
+  std::uint64_t overruns = 0;         // times the thread fell a full period behind
+
+  // All samples the ring rejected, whatever the policy.
+  [[nodiscard]] std::uint64_t dropped() const { return dropped_newest + dropped_timeout; }
+};
+
+// What a source does when its ring is full (SPEC §6).
+struct PushPolicy {
+  BackpressurePolicy policy = BackpressurePolicy::DropNewest;
+  Clock::duration timeout{};  // block_with_timeout only
 };
 
 class Source {
@@ -60,13 +71,20 @@ class Source {
 // - The sleep is split into slices of at most kStopPollInterval so stop() is
 //   prompt even for a 1 Hz source, without a mutex or condition variable on
 //   the producer path (ADR-012).
+// - A full ring is handled by the PushPolicy: drop_newest drops at once;
+//   block_with_timeout spins briefly, then yields, until the sample fits or
+//   the timeout passes (ADR-017). Blocking gives up early on stop(), so a long
+//   timeout can't hold up shutdown.
 class FixedRateSource final : public Source {
  public:
   static constexpr Clock::duration kStopPollInterval = std::chrono::milliseconds(10);
+  // block_with_timeout: busy-wait this many times before yielding the CPU.
+  static constexpr int kSpinsBeforeYield = 64;
 
-  // Produces into `ring` at rate_hz using `model`; nothing runs until start().
+  // Produces into `ring` at rate_hz using `model`, handling a full ring per
+  // `push_policy`; nothing runs until start().
   FixedRateSource(std::uint16_t id, std::string_view name, double rate_hz, SampleRing& ring,
-                  std::unique_ptr<SampleModel> model);
+                  std::unique_ptr<SampleModel> model, PushPolicy push_policy = {});
   // Stops and joins the thread if still running.
   ~FixedRateSource() override;
 
@@ -84,6 +102,8 @@ class FixedRateSource final : public Source {
  private:
   // Thread body: create, stamp, and push one sample per period.
   void run();
+  // Pushes per the policy; false (and counted) if the sample was dropped.
+  bool push(const Sample& sample);
   // Sleeps until deadline in kStopPollInterval slices; returns early on stop.
   void sleep_until_or_stop(Clock::time_point deadline) const;
 
@@ -93,10 +113,13 @@ class FixedRateSource final : public Source {
   const Clock::duration period_;
   SampleRing& ring_;
   std::unique_ptr<SampleModel> model_;
+  const PushPolicy push_policy_;
 
   std::atomic<bool> stop_requested_{false};
   std::atomic<std::uint64_t> generated_{0};
-  std::atomic<std::uint64_t> dropped_{0};
+  std::atomic<std::uint64_t> dropped_newest_{0};
+  std::atomic<std::uint64_t> dropped_timeout_{0};
+  std::atomic<std::uint64_t> blocked_{0};
   std::atomic<std::uint64_t> overruns_{0};
   std::thread thread_;
 };
