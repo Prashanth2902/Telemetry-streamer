@@ -36,13 +36,28 @@ void SeqGapMonitor::on_tick(std::int64_t now_ns) {
   for (std::size_t slot = 1; slot < state_.size(); ++slot) {
     State& s = state_[slot];
     if (s.pending_missing > 0 && now_ns - s.last_report_ns >= kReportIntervalNs) {
-      static_cast<void>(events_.push(
-          detail::make_event(ids_[slot], HealthMonitorKind::SeqGap, HealthSeverity::Warning,
-                             detail::clamp_detail(static_cast<std::int64_t>(s.pending_missing)))));
-      s.pending_missing = 0;
-      s.last_report_ns = now_ns;
+      report(slot, now_ns);
     }
   }
+}
+
+// Shutdown: nothing waits for the interval, so the counts add up exactly.
+void SeqGapMonitor::on_stop(std::int64_t now_ns) {
+  for (std::size_t slot = 1; slot < state_.size(); ++slot) {
+    if (state_[slot].pending_missing > 0) {
+      report(slot, now_ns);
+    }
+  }
+}
+
+// Clamped to the 32-bit detail field.
+void SeqGapMonitor::report(std::size_t slot, std::int64_t now_ns) {
+  State& s = state_[slot];
+  static_cast<void>(events_.push(
+      detail::make_event(ids_[slot], HealthMonitorKind::SeqGap, HealthSeverity::Warning,
+                         detail::clamp_detail(static_cast<std::int64_t>(s.pending_missing)))));
+  s.pending_missing = 0;
+  s.last_report_ns = now_ns;
 }
 
 }  // namespace tstream

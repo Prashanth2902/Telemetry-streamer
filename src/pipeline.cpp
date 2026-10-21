@@ -81,7 +81,7 @@ void Pipeline::run() {
       // whole pass finds nothing, then flush whatever is left.
       while (drain_pass(first_ring) > 0) {
       }
-      run_monitors();
+      run_monitors(/*final=*/true);
       if (!batcher_.empty()) {
         flush();
       }
@@ -128,13 +128,17 @@ std::size_t Pipeline::drain_pass(std::size_t first_ring) {
 
 // Events are drained every loop, so each queue only holds one loop's worth.
 // A full batch is flushed first, like in drain_pass().
-void Pipeline::run_monitors() {
+void Pipeline::run_monitors(bool final) {
   if (monitors_.empty()) {
     return;
   }
   const std::int64_t now = now_ns();
   for (HealthMonitor* monitor : monitors_) {
-    monitor->on_tick(now);
+    if (final) {
+      monitor->on_stop(now);
+    } else {
+      monitor->on_tick(now);
+    }
     while (const std::optional<HealthData> event = monitor->poll_event()) {
       if (batcher_.full()) {
         flush();

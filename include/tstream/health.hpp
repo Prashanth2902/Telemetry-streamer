@@ -3,8 +3,9 @@
 // thresholds derived from the config.
 //
 // Monitors run on the pipeline thread. They raise an event when a condition
-// starts (Warning or Critical) and a Cleared event when it ends, so the
-// stream carries the state changes rather than one event per sample.
+// starts (Warning or Critical) and, where the condition has an end, a Cleared
+// event when it ends, so the stream carries the state changes rather than one
+// event per sample.
 
 #pragma once
 
@@ -26,17 +27,25 @@ inline constexpr std::size_t kHealthMonitorKinds = 4;  // values 1..4
 // How bad it is (HealthData::severity). Cleared means the condition ended.
 enum class HealthSeverity : std::uint8_t { Cleared = 0, Warning = 1, Critical = 2 };
 
-// Short names for logs and receiver output, e.g. "stale", "warning".
+// Short name for logs and receiver output, e.g. "stale"; "unknown" otherwise.
 std::string_view monitor_name(std::uint8_t monitor);
+// Short name for logs and receiver output, e.g. "warning"; "unknown" otherwise.
 std::string_view severity_name(std::uint8_t severity);
 
 // SPEC §7: a pluggable monitor. on_sample sees every sample the pipeline
 // drains, on_tick runs on every pipeline loop iteration for time-based checks,
 // and poll_event hands back queued events without allocating.
 struct HealthMonitor {
+  // Virtual: the pipeline holds monitors through this interface.
   virtual ~HealthMonitor() = default;
+  // Called for every sample the pipeline batches, in order.
   virtual void on_sample(const Sample& sample, std::int64_t now_ns) = 0;
+  // Called on every pipeline loop iteration, for time-based checks.
   virtual void on_tick(std::int64_t now_ns) = 0;
+  // Called once, after the final drain: report anything still held back.
+  // Defaults to a last tick.
+  virtual void on_stop(std::int64_t now_ns) { on_tick(now_ns); }
+  // The oldest queued event, if any. Must not allocate.
   virtual std::optional<HealthData> poll_event() = 0;
 };
 

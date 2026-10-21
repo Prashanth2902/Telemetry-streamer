@@ -68,8 +68,9 @@ class Pipeline {
   void run();
   // One round-robin pass over all rings from first_ring; returns samples taken.
   std::size_t drain_pass(std::size_t first_ring);
-  // Ticks every monitor, then moves their events into the batch.
-  void run_monitors();
+  // Ticks every monitor (or, when `final`, calls on_stop), then moves their
+  // events into the batch.
+  void run_monitors(bool final = false);
   // Sends the open batch to the sink, credits delivered counts, and clears it.
   void flush();
   // Sleeps until the open batch is due, or kIdleSleep at most.

@@ -23,9 +23,13 @@ namespace tstream {
 // produces anything goes stale too.
 class StaleMonitor final : public HealthMonitor {
  public:
+  // Every source counts as last seen at start_ns.
   StaleMonitor(std::span<const SourceHealthThresholds> thresholds, std::int64_t start_ns);
+  // Records the sample's arrival; clears the source if it was stale.
   void on_sample(const Sample& sample, std::int64_t now_ns) override;
+  // Raises for every source silent for longer than its threshold.
   void on_tick(std::int64_t now_ns) override;
+  // Pops the oldest queued event.
   std::optional<HealthData> poll_event() override { return events_.pop(); }
 
  private:
@@ -49,16 +53,19 @@ class RateMonitor final : public HealthMonitor {
  public:
   static constexpr std::size_t kBuckets = 10;
 
+  // Every source's first bucket starts at start_ns.
   RateMonitor(std::span<const SourceHealthThresholds> thresholds, std::int64_t start_ns);
+  // Counts the sample into its source's current bucket.
   void on_sample(const Sample& sample, std::int64_t now_ns) override;
+  // Closes buckets that ended, so silence lowers the rate too.
   void on_tick(std::int64_t now_ns) override;
+  // Pops the oldest queued event.
   std::optional<HealthData> poll_event() override { return events_.pop(); }
 
  private:
   struct State {
     double expected_hz = 0;
     double tolerance_pct = 0;
-    std::int64_t window_ns = 0;
     std::int64_t bucket_ns = 0;
     std::int64_t bucket_start_ns = 0;            // start of the bucket being filled
     std::uint32_t filling = 0;                   // samples in the bucket being filled
@@ -79,14 +86,22 @@ class RateMonitor final : public HealthMonitor {
 // Warning when a source's seq jumps, meaning samples were dropped before the
 // pipeline (SPEC §4.1). Gaps are added up and reported at most once per
 // kReportInterval per source, so a burst of drops is one event, not
-// thousands. Detail: samples missing since the last report.
+// thousands; whatever is still pending is reported on stop. There is no
+// Cleared: a gap is an event, not a state. Detail: samples missing since the
+// last report.
 class SeqGapMonitor final : public HealthMonitor {
  public:
   static constexpr std::int64_t kReportIntervalNs = 100'000'000;  // 100 ms
 
+  // Only the source ids are used.
   explicit SeqGapMonitor(std::span<const SourceHealthThresholds> thresholds);
+  // Adds any seqs skipped since the source's previous sample.
   void on_sample(const Sample& sample, std::int64_t now_ns) override;
+  // Reports pending gaps, at most once per kReportIntervalNs per source.
   void on_tick(std::int64_t now_ns) override;
+  // Reports every pending gap, whatever the interval.
+  void on_stop(std::int64_t now_ns) override;
+  // Pops the oldest queued event.
   std::optional<HealthData> poll_event() override { return events_.pop(); }
 
  private:
@@ -96,6 +111,8 @@ class SeqGapMonitor final : public HealthMonitor {
     std::uint64_t pending_missing = 0;
     std::int64_t last_report_ns = 0;
   };
+  // Queues one event with the source's pending count and resets it.
+  void report(std::size_t slot, std::int64_t now_ns);
   std::vector<std::uint16_t> ids_;
   SourceIndex index_;
   std::vector<State> state_;
@@ -104,13 +121,16 @@ class SeqGapMonitor final : public HealthMonitor {
 
 // Warning when a source's payload is unchanged for frozen_count samples in a
 // row (a stuck sensor); Cleared on the first change. Detail: the run length
-// when raised.
+// when raised (frozen_count), or the final run length when cleared.
 class FrozenMonitor final : public HealthMonitor {
  public:
+  // Each source gets its frozen_count.
   explicit FrozenMonitor(std::span<const SourceHealthThresholds> thresholds);
+  // Extends or restarts the source's run of identical payloads.
   void on_sample(const Sample& sample, std::int64_t now_ns) override;
   // Purely sample-driven; nothing to do on ticks.
   void on_tick(std::int64_t /*now_ns*/) override {}
+  // Pops the oldest queued event.
   std::optional<HealthData> poll_event() override { return events_.pop(); }
 
  private:

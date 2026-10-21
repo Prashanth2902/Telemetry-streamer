@@ -15,8 +15,8 @@ RateMonitor::RateMonitor(std::span<const SourceHealthThresholds> thresholds, std
     State& s = state_[i + 1];
     s.expected_hz = thresholds[i].expected_rate_hz;
     s.tolerance_pct = thresholds[i].rate_tolerance_pct;
-    s.window_ns = thresholds[i].rate_window_ns;
-    s.bucket_ns = std::max<std::int64_t>(s.window_ns / static_cast<std::int64_t>(kBuckets), 1);
+    s.bucket_ns = std::max<std::int64_t>(
+        thresholds[i].rate_window_ns / static_cast<std::int64_t>(kBuckets), 1);
     s.bucket_start_ns = start_ns;
   }
 }

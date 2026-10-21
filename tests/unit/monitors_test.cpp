@@ -242,6 +242,20 @@ TEST(SeqGapMonitor, CoalescesGapsWithinTheReportInterval) {
   EXPECT_EQ(events[0].detail, 13U);
 }
 
+TEST(SeqGapMonitor, StopReportsWhatTheIntervalHeldBack) {
+  const auto t = thresholds();
+  SeqGapMonitor m(t);
+  m.on_sample(sample(1, 0), 0);
+  m.on_sample(sample(1, 3), 0);
+  m.on_tick(200 * kMs);
+  ASSERT_EQ(drain(m).size(), 1U);
+  m.on_sample(sample(1, 10), 210 * kMs);  // 6 more, 10 ms after the report
+  m.on_stop(220 * kMs);
+  const auto events = drain(m);
+  ASSERT_EQ(events.size(), 1U);
+  EXPECT_EQ(events[0].detail, 6U);
+}
+
 TEST(SeqGapMonitor, NoEventWithoutGapsAndHandlesWraparound) {
   const auto t = thresholds();
   SeqGapMonitor m(t);
