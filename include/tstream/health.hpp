@@ -21,6 +21,7 @@ namespace tstream {
 
 // Which monitor raised an event (HealthData::monitor).
 enum class HealthMonitorKind : std::uint8_t { Stale = 1, Rate = 2, SeqGap = 3, Frozen = 4 };
+inline constexpr std::size_t kHealthMonitorKinds = 4;  // values 1..4
 
 // How bad it is (HealthData::severity). Cleared means the condition ended.
 enum class HealthSeverity : std::uint8_t { Cleared = 0, Warning = 1, Critical = 2 };
