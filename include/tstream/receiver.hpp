@@ -13,6 +13,8 @@
 // - Latency (SPEC §4.4) is only measured when the sender is on this host,
 //   where both sides read the same CLOCK_MONOTONIC. For a remote sender it is
 //   reported as unavailable instead of as misleading numbers.
+// - Health samples (SPEC §7) are counted per monitor and queued for the caller
+//   to print, in the order they arrived with the data.
 
 #pragma once
 
@@ -26,7 +28,9 @@
 #include <vector>
 
 #include "tstream/framing.hpp"
+#include "tstream/health.hpp"
 #include "tstream/latency_histogram.hpp"
+#include "tstream/sample.hpp"
 #include "tstream/seq_tracker.hpp"
 
 namespace tstream {
@@ -42,9 +46,19 @@ struct ReceiverStats {
   std::uint64_t decode_errors = 0;    // well-framed payloads that aren't a valid Batch
   std::uint64_t invalid_samples = 0;  // samples with no payload or an out-of-range id
   std::array<std::uint64_t, framing::kFrameErrorCount> frame_errors{};  // by FrameError
+  // Health samples by HealthMonitorKind value; index 0 counts unknown monitors.
+  std::array<std::uint64_t, kHealthMonitorKinds + 1> health_events{};
 
   // Total frame errors of all kinds.
   [[nodiscard]] std::uint64_t total_frame_errors() const;
+  // Total health samples of all monitors.
+  [[nodiscard]] std::uint64_t total_health_events() const;
+};
+
+// A health sample as received: when it was raised, and what it says.
+struct ReceivedHealthEvent {
+  std::int64_t t_capture_ns = 0;
+  HealthData data{};
 };
 
 class Receiver {
@@ -89,6 +103,8 @@ class Receiver {
   [[nodiscard]] const LatencyHistogram& pipeline_latency() const { return pipeline_; }
   // Same two, since the last take_interval() call; then cleared.
   void take_interval(LatencyHistogram& e2e, LatencyHistogram& pipeline);
+  // Health events received since the last call, oldest first; then cleared.
+  [[nodiscard]] std::vector<ReceivedHealthEvent> take_health_events();
 
  private:
   // Accepts a pending connection (or rejects it if one is already active).
@@ -104,6 +120,9 @@ class Receiver {
   [[nodiscard]] bool slow() const;
   // Decodes one frame payload and updates stats; false if it isn't a valid Batch.
   bool handle_frame(std::span<const std::byte> payload);
+  // Counts and queues one health sample.
+  void record_health(std::int64_t t_capture_ns, std::uint32_t source_id, std::uint32_t monitor,
+                     std::uint32_t severity, std::uint32_t detail);
 
   Options options_;
   int listen_fd_ = -1;
@@ -123,6 +142,7 @@ class Receiver {
   LatencyHistogram pipeline_;
   LatencyHistogram e2e_interval_;
   LatencyHistogram pipeline_interval_;
+  std::vector<ReceivedHealthEvent> health_pending_;
 };
 
 }  // namespace tstream

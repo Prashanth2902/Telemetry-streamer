@@ -72,6 +72,7 @@ TEST(Stats, StatsLineShowsTotalsRateAndTransport) {
   now.t_s = 2.0;
   now.sources[0].counters.generated = 1100;  // 1000 more in 1 s
   now.batches = 7;
+  now.health_events = 2;
   TransportCounters t;
   t.queued = 4;
   t.queue_high_water = 9;
@@ -79,7 +80,7 @@ TEST(Stats, StatsLineShowsTotalsRateAndTransport) {
 
   const std::string line = tstream::format_stats_line(now, previous);
   EXPECT_THAT(line, HasSubstr("stats t=2.0s generated=1100 rate=1000/s"));
-  EXPECT_THAT(line, HasSubstr("batches=7"));
+  EXPECT_THAT(line, HasSubstr("batches=7 health=2"));
   EXPECT_THAT(line, HasSubstr("queued=4 queue_high_water=9"));
 
   now.transport.reset();
@@ -90,6 +91,7 @@ TEST(Stats, SummaryHasPerSourceTotalAndTransportLines) {
   SenderStats stats;
   stats.sources = {balanced_source(1), balanced_source(2)};
   stats.batches = 12;
+  stats.health_events = 3;
   stats.transport = TransportCounters{};
 
   const auto lines = tstream::format_summary(stats);
@@ -98,7 +100,7 @@ TEST(Stats, SummaryHasPerSourceTotalAndTransportLines) {
   EXPECT_THAT(lines[0], HasSubstr("dropped_newest=3 dropped_timeout=2"));
   EXPECT_THAT(lines[0], HasSubstr("tx_sent=90 tx_dropped=5 lost=0"));
   EXPECT_THAT(lines[2], HasSubstr("summary total generated=200 dropped=10 delivered=190"));
-  EXPECT_THAT(lines[2], HasSubstr("lost=0 batches=12"));
+  EXPECT_THAT(lines[2], HasSubstr("lost=0 batches=12 health_events=3"));
   EXPECT_THAT(lines[3], HasSubstr("summary transport "));
 
   stats.transport.reset();  // stdout sink: no transport line

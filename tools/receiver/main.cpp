@@ -1,8 +1,9 @@
 // tstream-recv: receives framed batches from tstream, checks them, and reports
 // throughput, sequence gaps, and latency (SPEC §3).
 //
-// stdout: "listening on HOST:PORT", one "stats ..." line per interval, then a
-// "recv summary ..." line and one "recv source=..." line per source.
+// stdout: "listening on HOST:PORT", one "stats ..." line per interval, one
+// "health ..." line per health event as it arrives, then a "recv summary ..."
+// line, a "recv health ..." line, and one "recv source=..." line per source.
 // Exit codes: 0 ok, 1 usage error, 2 cannot listen.
 
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <exception>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,7 +20,9 @@
 #include <spdlog/fmt/fmt.h>
 
 #include "tstream/clock.hpp"
+#include "tstream/fault.hpp"
 #include "tstream/framing.hpp"
+#include "tstream/health.hpp"
 #include "tstream/latency_histogram.hpp"
 #include "tstream/receiver.hpp"
 #include "tstream/stop_signal.hpp"
@@ -34,7 +38,8 @@ struct Options {
 constexpr std::string_view kUsage =
     "usage: tstream-recv [--port N] [--bind ADDR] [--max-frame-bytes N]\n"
     "                    [--interval SECONDS] [--duration SECONDS]\n"
-    "                    [--slow-consumer-ms MS [--slow-for SECONDS]]\n"
+    "                    [--slow-consumer-ms MS | --fault slow_consumer:MS]\n"
+    "                    [--slow-for SECONDS]\n"
     "  Defaults: --port 9000 --bind 127.0.0.1 --max-frame-bytes 1048576 --interval 1\n"
     "  --port 0 picks a free port (printed on the first line).\n"
     "  --slow-consumer-ms reads 1 KiB per MS to force backpressure; --slow-for ends that.\n";
@@ -88,6 +93,18 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
       options.receiver.slow_read_delay = std::chrono::milliseconds(*ms);
+    } else if (arg == "--fault") {
+      // The one receiver-side fault (SPEC §8); same syntax as tstream's --fault.
+      try {
+        const tstream::Fault fault = tstream::parse_fault(value);
+        if (fault.kind != tstream::FaultKind::SlowConsumer) {
+          return std::nullopt;
+        }
+        options.receiver.slow_read_delay =
+            std::chrono::milliseconds(static_cast<std::int64_t>(fault.arg));
+      } catch (const std::invalid_argument&) {
+        return std::nullopt;
+      }
     } else if (arg == "--slow-for") {
       const auto seconds = parse_positive(value);
       if (!seconds) {
@@ -140,6 +157,19 @@ void print_interval(const tstream::Receiver& receiver, double elapsed_s,
   std::fflush(stdout);
 }
 
+// One line per health event; detail's unit depends on the monitor (README).
+void print_health(tstream::Receiver& receiver, double elapsed_s) {
+  const auto events = receiver.take_health_events();
+  for (const tstream::ReceivedHealthEvent& e : events) {
+    fmt::print("health t={:.3f}s source={} monitor={} severity={} detail={}\n", elapsed_s,
+               e.data.source_id, tstream::monitor_name(e.data.monitor),
+               tstream::severity_name(e.data.severity), e.data.detail);
+  }
+  if (!events.empty()) {
+    std::fflush(stdout);
+  }
+}
+
 // Final totals since start, then one line per source.
 void print_summary(const tstream::Receiver& receiver) {
   const auto& s = receiver.stats();
@@ -158,6 +188,13 @@ void print_summary(const tstream::Receiver& receiver) {
       s.decode_errors, s.invalid_samples, s.connections, s.rejected_connections,
       latency_text(receiver.e2e_latency(), receiver.latency_available()),
       latency_text(receiver.pipeline_latency(), receiver.latency_available()));
+  std::string by_monitor;
+  for (std::size_t kind = 1; kind <= tstream::kHealthMonitorKinds; ++kind) {
+    by_monitor += fmt::format(" {}={}", tstream::monitor_name(static_cast<std::uint8_t>(kind)),
+                              s.health_events[kind]);
+  }
+  fmt::print("recv health events={}{} unknown={}\n", s.total_health_events(), by_monitor,
+             s.health_events[0]);
   for (const auto& [id, src] : receiver.seq().sources()) {
     fmt::print("recv source={} samples={} gaps={} out_of_order={}\n", id, src.received, src.gaps,
                src.out_of_order);
@@ -178,6 +215,7 @@ void run(tstream::Receiver& receiver, const Options& options) {
     receiver.poll(20);
     const auto now = tstream::Clock::now();
     const double elapsed_s = std::chrono::duration<double>(now - start).count();
+    print_health(receiver, elapsed_s);
     if (now >= next_report) {
       receiver.take_interval(e2e, pipeline);
       print_interval(receiver, elapsed_s, receiver.stats().samples - last_samples,

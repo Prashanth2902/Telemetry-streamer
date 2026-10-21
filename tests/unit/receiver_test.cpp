@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include "tstream/framing.hpp"
+#include "tstream/health.hpp"
 #include "tstream/latency_histogram.hpp"
 #include "tstream/seq_tracker.hpp"
 #include "tstream/tcp_transport.hpp"
@@ -287,6 +289,45 @@ TEST(Receiver, RejectsSecondConcurrentSender) {
   ASSERT_TRUE(pump(receiver, nullptr, [&] { return receiver.stats().rejected_connections == 1; }));
   ::close(first);
   ::close(second);
+}
+
+TEST(Receiver, CountsAndQueuesHealthEventsInOrder) {
+  Receiver receiver(receiver_options());
+  TcpTransport transport(transport_options(receiver.port()));
+  ASSERT_TRUE(pump(receiver, &transport, [&] { return receiver.stats().connections == 1; }));
+
+  auto samples = samples_with_seqs(0, 4);
+  // Two health samples between the data: stale critical, then cleared.
+  for (const auto [at, seq, severity] : {std::tuple{1, 0U, tstream::HealthSeverity::Critical},
+                                         std::tuple{3, 1U, tstream::HealthSeverity::Cleared}}) {
+    Sample h{};
+    h.source_id = tstream::kPipelineSourceId;
+    h.kind = SampleKind::Health;
+    h.seq = seq;
+    h.t_capture_ns = tstream::now_ns();
+    h.health = {.source_id = 7,
+                .monitor = static_cast<std::uint8_t>(tstream::HealthMonitorKind::Stale),
+                .severity = static_cast<std::uint8_t>(severity),
+                .detail = 100 + seq};
+    samples.insert(samples.begin() + at, h);
+  }
+  transport.send(BatchView{.batch_seq = 0, .t_flush_ns = 0, .samples = samples});
+  transport.close();
+  ASSERT_TRUE(pump(receiver, nullptr, [&] { return receiver.stats().disconnects == 1; }));
+
+  const auto& s = receiver.stats();
+  EXPECT_EQ(s.samples, 6U);
+  EXPECT_EQ(s.total_health_events(), 2U);
+  EXPECT_EQ(s.health_events[static_cast<std::size_t>(tstream::HealthMonitorKind::Stale)], 2U);
+  EXPECT_EQ(receiver.seq().total_gaps(), 0U) << "source 0 has its own seq";
+
+  const auto events = receiver.take_health_events();
+  ASSERT_EQ(events.size(), 2U);
+  EXPECT_EQ(events[0].data.source_id, 7);
+  EXPECT_EQ(events[0].data.severity, static_cast<std::uint8_t>(tstream::HealthSeverity::Critical));
+  EXPECT_EQ(events[0].data.detail, 100U);
+  EXPECT_EQ(events[1].data.severity, static_cast<std::uint8_t>(tstream::HealthSeverity::Cleared));
+  EXPECT_TRUE(receiver.take_health_events().empty()) << "taken once";
 }
 
 }  // namespace

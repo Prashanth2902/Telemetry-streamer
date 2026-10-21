@@ -20,6 +20,9 @@
 
 #include "tstream/clock.hpp"
 #include "tstream/config.hpp"
+#include "tstream/fault.hpp"
+#include "tstream/health.hpp"
+#include "tstream/monitors.hpp"
 #include "tstream/pipeline.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sink.hpp"
@@ -47,15 +50,18 @@ struct Options {
   std::string config_path;
   std::optional<double> duration_s;
   SinkKind sink = SinkKind::Tcp;
-  double stats_interval_s = 1.0;  // 0 turns the periodic stats line off
+  double stats_interval_s = 1.0;    // 0 turns the periodic stats line off
+  std::vector<std::string> faults;  // --fault, added to the config's faults
 };
 
 constexpr std::string_view kUsage =
     "usage: tstream --config <path> [--duration <seconds>] [--sink tcp|stdout]\n"
-    "               [--stats-interval <seconds>]\n"
+    "               [--stats-interval <seconds>] [--fault <spec>]...\n"
     "  Runs until SIGINT/SIGTERM, or for --duration seconds.\n"
     "  --sink tcp (default) sends to transport.host:port; stdout prints one line per batch.\n"
-    "  --stats-interval (default 1) prints a stats line that often; 0 turns it off.\n";
+    "  --stats-interval (default 1) prints a stats line that often; 0 turns it off.\n"
+    "  --fault kind:source:arg[@start_ms[+dur_ms]] injects a fault (README):\n"
+    "    stall:<id>:<ms>  burst:<id>:<n>  rate:<id>:<factor>  freeze:<id>\n";
 
 // A non-negative number of seconds; nullopt for anything else, including "".
 std::optional<double> parse_seconds(const char* text) {
@@ -90,6 +96,8 @@ std::optional<Options> parse_args(int argc, char** argv) {
         return std::nullopt;
       }
       options.duration_s = seconds;
+    } else if (arg == "--fault" && has_value) {
+      options.faults.emplace_back(argv[++i]);
     } else if (arg == "--stats-interval" && has_value) {
       const auto seconds = parse_seconds(argv[++i]);
       if (!seconds) {
@@ -132,7 +140,10 @@ void wait_for_stop(const Options& options,
 
 // Builds everything from the config, runs it, shuts down in order; returns the exit code.
 int run(const Options& options) {
-  const tstream::Config config = tstream::load_config(options.config_path);
+  tstream::Config config = tstream::load_config(options.config_path);
+  for (const std::string& fault : options.faults) {
+    tstream::add_fault(config, fault);
+  }
 
   std::vector<std::unique_ptr<tstream::SampleRing>> rings;
   std::vector<std::unique_ptr<tstream::Source>> sources;
@@ -140,7 +151,8 @@ int run(const Options& options) {
   for (const auto& source_config : config.sources) {
     rings.push_back(tstream::make_sample_ring(source_config.ring_capacity));
     ring_ptrs.push_back(rings.back().get());
-    sources.push_back(tstream::make_source(source_config, *rings.back(), config.seed));
+    sources.push_back(
+        tstream::make_source(source_config, *rings.back(), config.seed, config.faults));
   }
 
   std::unique_ptr<tstream::BatchSink> sink;
@@ -163,10 +175,23 @@ int run(const Options& options) {
   } else {
     sink = std::make_unique<tstream::StdoutSink>();
   }
-  tstream::Pipeline pipeline(ring_ptrs, config.batch, *sink);
+  // Monitors start their clocks now, just before the sources do, so a source
+  // that never produces still goes stale.
+  const std::vector<tstream::SourceHealthThresholds> thresholds =
+      tstream::health_thresholds(config);
+  const std::int64_t start_ns = tstream::now_ns();
+  tstream::StaleMonitor stale(thresholds, start_ns);
+  tstream::RateMonitor rate(thresholds, start_ns);
+  tstream::SeqGapMonitor seq_gap(thresholds);
+  tstream::FrozenMonitor frozen(thresholds);
+  tstream::Pipeline pipeline(ring_ptrs, config.batch, *sink, {&stale, &rate, &seq_gap, &frozen});
 
   log_line("info", "starting {} sources (batch max_samples={} max_delay_us={})", sources.size(),
            config.batch.max_samples, config.batch.max_delay_us);
+  for (const tstream::Fault& fault : config.faults) {
+    log_line("info", "fault {} on source {} at {} ms", tstream::fault_kind_name(fault.kind),
+             fault.source_id, fault.start_ns / tstream::kNsPerMs);
+  }
   pipeline.start();
   for (auto& source : sources) {
     source->start();

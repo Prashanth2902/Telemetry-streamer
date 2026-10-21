@@ -222,4 +222,57 @@ TEST(Config, LoadConfigReportsMissingFile) {
   }
 }
 
+TEST(Config, ParsesFaults) {
+  auto j = example();
+  j["faults"] = {"stall:1:500@1000", "rate:3:2"};
+  const auto config = parse_config(j.dump());
+  ASSERT_EQ(config.faults.size(), 2U);
+  EXPECT_EQ(config.faults[0].kind, tstream::FaultKind::Stall);
+  EXPECT_EQ(config.faults[1].source_id, 3);
+  EXPECT_TRUE(parse_config(example().dump()).faults.empty());
+}
+
+TEST(Config, RejectsBadFaults) {
+  auto j = example();
+  j["faults"] = "stall:1:5";
+  expect_error(j, "faults: must be an array");
+  j["faults"] = {5};
+  expect_error(j, "faults[0]: must be a string");
+  j["faults"] = {"stall:1:5", "stall:9:5"};
+  expect_error(j, "faults[1]: fault \"stall:9:5\": no source with id 9");
+  j["faults"] = {"explode:1:5"};
+  expect_error(j, "unknown kind");
+  j["faults"] = {"slow_consumer:10"};
+  expect_error(j, "receiver fault");
+  j["sources"][0]["rate_hz"] = 5000;
+  j["faults"] = {"rate:1:50"};  // 5 kHz x 50 > kMaxRateHz
+  expect_error(j, "above 100000 Hz");
+}
+
+TEST(Config, RejectsCombinedRateFaultsAboveMaximum) {
+  auto j = example();
+  j["faults"] = {"rate:1:50", "rate:1:50"};  // 1 kHz x 2500
+  expect_error(j, "faults[1]");
+  j["faults"] = {"rate:1:50", "rate:2:50"};  // different sources: fine
+  EXPECT_NO_THROW(parse_config(j.dump()));
+}
+
+TEST(Config, HealthWindowsAreAtLeastOneMillisecond) {
+  auto j = example();
+  j["sources"][0]["health"] = {{"rate_window_ms", 0.00001}};
+  expect_error(j, "sources[0].health.rate_window_ms: must be at least 1");
+  j = example();
+  j["health"]["stale_min_ms"] = 0.5;
+  expect_error(j, "health.stale_min_ms: must be at least 1");
+}
+
+TEST(Config, AddFaultAppendsAfterLoading) {
+  auto config = parse_config(example().dump());
+  tstream::add_fault(config, "freeze:1@100+50");
+  ASSERT_EQ(config.faults.size(), 1U);
+  EXPECT_EQ(config.faults[0].kind, tstream::FaultKind::Freeze);
+  EXPECT_THROW(tstream::add_fault(config, "freeze:4"), ConfigError);
+  EXPECT_EQ(config.faults.size(), 1U);
+}
+
 }  // namespace

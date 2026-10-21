@@ -93,6 +93,15 @@ std::uint64_t ReceiverStats::total_frame_errors() const {
   return total;
 }
 
+// Sums the per-monitor counters.
+std::uint64_t ReceiverStats::total_health_events() const {
+  std::uint64_t total = 0;
+  for (const auto n : health_events) {
+    total += n;
+  }
+  return total;
+}
+
 // Binds the first address bind_host:port resolves to.
 Receiver::Receiver(Options options)
     : options_(std::move(options)), decoder_(options_.max_frame_bytes), read_buffer_(kReadChunk) {
@@ -158,6 +167,13 @@ void Receiver::take_interval(LatencyHistogram& e2e, LatencyHistogram& pipeline) 
   pipeline = pipeline_interval_;
   e2e_interval_.reset();
   pipeline_interval_.reset();
+}
+
+// Swaps the queue out, so the caller owns it and the next batch starts a new one.
+std::vector<ReceivedHealthEvent> Receiver::take_health_events() {
+  std::vector<ReceivedHealthEvent> out;
+  out.swap(health_pending_);
+  return out;
 }
 
 // Only one sender at a time: extras are accepted just to be closed.
@@ -270,6 +286,10 @@ bool Receiver::handle_frame(std::span<const std::byte> payload) {
     }
     ++stats_.samples;
     seq_.on_sample(static_cast<std::uint16_t>(sample.source_id()), sample.seq());
+    if (sample.has_health()) {
+      const v1::Health& h = sample.health();
+      record_health(sample.t_capture_ns(), h.source_id(), h.monitor(), h.severity(), h.detail());
+    }
     if (latency_available_) {
       const std::int64_t e2e = received_ns - sample.t_capture_ns();
       const std::int64_t pipeline = batch.t_send_ns() - sample.t_capture_ns();
@@ -280,6 +300,25 @@ bool Receiver::handle_frame(std::span<const std::byte> payload) {
     }
   }
   return true;
+}
+
+// Wire values are uint32. A monitor or severity that doesn't fit a byte
+// becomes 0xFF, which monitor_name() and severity_name() report as unknown
+// (0 would read as a real severity, Cleared).
+void Receiver::record_health(std::int64_t t_capture_ns, std::uint32_t source_id,
+                             std::uint32_t monitor, std::uint32_t severity, std::uint32_t detail) {
+  const auto narrow8 = [](std::uint32_t v) {
+    return static_cast<std::uint8_t>(v <= 0xFF ? v : 0xFF);
+  };
+  ReceivedHealthEvent event;
+  event.t_capture_ns = t_capture_ns;
+  event.data = {.source_id = static_cast<std::uint16_t>(source_id <= 0xFFFF ? source_id : 0),
+                .monitor = narrow8(monitor),
+                .severity = narrow8(severity),
+                .detail = detail};
+  const std::size_t index = monitor <= kHealthMonitorKinds ? monitor : 0;
+  ++stats_.health_events[index];
+  health_pending_.push_back(event);
 }
 
 }  // namespace tstream

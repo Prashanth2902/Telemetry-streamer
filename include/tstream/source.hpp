@@ -6,12 +6,15 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "tstream/clock.hpp"
 #include "tstream/config.hpp"
+#include "tstream/fault.hpp"
 #include "tstream/sample.hpp"
 #include "tstream/sample_ring.hpp"
 #include "tstream/sim_models.hpp"
@@ -75,6 +78,12 @@ class Source {
 //   block_with_timeout spins briefly, then yields, until the sample fits or
 //   the timeout passes (ADR-017). Blocking gives up early on stop(), so a long
 //   timeout can't hold up shutdown.
+// - Faults (SPEC §8) come as a plan fixed at construction, timed from the
+//   thread's start. A stall produces nothing and consumes no seqs, then
+//   resumes on a fresh schedule; rate scales the period; freeze repeats the
+//   last payload with new seqs. A burst generates its n extra samples into a
+//   buffer allocated at construction, then pushes them back to back with one
+//   timestamp, so they reach the ring faster than any consumer can drain.
 class FixedRateSource final : public Source {
  public:
   static constexpr Clock::duration kStopPollInterval = std::chrono::milliseconds(10);
@@ -82,9 +91,11 @@ class FixedRateSource final : public Source {
   static constexpr int kSpinsBeforeYield = 64;
 
   // Produces into `ring` at rate_hz using `model`, handling a full ring per
-  // `push_policy`; nothing runs until start().
+  // `push_policy` and running `faults` (those for other sources are ignored);
+  // nothing runs until start().
   FixedRateSource(std::uint16_t id, std::string_view name, double rate_hz, SampleRing& ring,
-                  std::unique_ptr<SampleModel> model, PushPolicy push_policy = {});
+                  std::unique_ptr<SampleModel> model, PushPolicy push_policy = {},
+                  const std::vector<Fault>& faults = {});
   // Stops and joins the thread if still running.
   ~FixedRateSource() override;
 
@@ -102,6 +113,19 @@ class FixedRateSource final : public Source {
  private:
   // Thread body: create, stamp, and push one sample per period.
   void run();
+  // The next sample, stamped now: a fresh payload, or `last`'s if frozen.
+  // Updates `last` and advances `seq`.
+  Sample next_sample(std::uint32_t& seq, bool frozen, Sample& last);
+  // Counts the sample as generated and pushes it per the policy.
+  void emit(const Sample& sample);
+  // Generates `count` samples into burst_buffer_, then pushes them all.
+  void emit_burst(std::size_t count, std::uint32_t& seq, bool frozen, Sample& last);
+  // End of the stall in effect `elapsed_ns` after start, if any.
+  [[nodiscard]] std::optional<std::int64_t> stall_end_at(std::int64_t elapsed_ns) const;
+  // True if a freeze is in effect at `elapsed_ns`.
+  [[nodiscard]] bool frozen_at(std::int64_t elapsed_ns) const;
+  // The period at `elapsed_ns`: the base period over every active rate factor.
+  [[nodiscard]] Clock::duration period_at(std::int64_t elapsed_ns) const;
   // Pushes per the policy; false (and counted) if the sample was dropped.
   bool push(const Sample& sample);
   // Sleeps until deadline in kStopPollInterval slices; returns early on stop.
@@ -114,6 +138,9 @@ class FixedRateSource final : public Source {
   SampleRing& ring_;
   std::unique_ptr<SampleModel> model_;
   const PushPolicy push_policy_;
+  const std::vector<Fault> faults_;   // this source's only
+  std::vector<Sample> burst_buffer_;  // sized for the largest burst; producer thread only
+  std::vector<bool> burst_fired_;     // per entry of faults_; producer thread only
 
   std::atomic<bool> stop_requested_{false};
   std::atomic<std::uint64_t> generated_{0};
@@ -124,9 +151,10 @@ class FixedRateSource final : public Source {
   std::thread thread_;
 };
 
-// Builds the source described by `config`, producing into `ring`. The model's
-// noise is seeded from (seed, config.id), so runs are reproducible.
+// Builds the source described by `config`, producing into `ring` and running
+// whichever of `faults` name it. The model's noise is seeded from
+// (seed, config.id), so runs are reproducible.
 std::unique_ptr<Source> make_source(const SourceConfig& config, SampleRing& ring,
-                                    std::uint64_t seed);
+                                    std::uint64_t seed, const std::vector<Fault>& faults = {});
 
 }  // namespace tstream

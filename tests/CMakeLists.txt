@@ -38,6 +38,9 @@ tstream_add_test(encoder_test LABEL unit SOURCES unit/encoder_test.cpp)
 tstream_add_test(tcp_transport_test LABEL unit SOURCES unit/tcp_transport_test.cpp)
 tstream_add_test(receiver_test LABEL unit SOURCES unit/receiver_test.cpp)
 tstream_add_test(stats_test LABEL unit SOURCES unit/stats_test.cpp)
+tstream_add_test(fault_test LABEL unit SOURCES unit/fault_test.cpp)
+tstream_add_test(health_test LABEL unit SOURCES unit/health_test.cpp)
+tstream_add_test(monitors_test LABEL unit SOURCES unit/monitors_test.cpp)
 
 # Replaces global operator new, so it must be its own executable (SPEC §9).
 # Not built with sanitizers: they ship their own operator new (clang's static
@@ -47,9 +50,12 @@ if(TSTREAM_SANITIZER STREQUAL "none")
   tstream_add_test(encoder_alloc_test LABEL alloc SOURCES alloc/encoder_alloc_test.cpp)
 endif()
 
-tstream_add_test(e2e_test LABEL integration TIMEOUT 300 SOURCES integration/e2e_test.cpp)
-target_compile_definitions(e2e_test PRIVATE
-  TSTREAM_BINARY="$<TARGET_FILE:tstream>"
-  TSTREAM_RECV_BINARY="$<TARGET_FILE:tstream-recv>"
-  TSTREAM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-add_dependencies(e2e_test tstream tstream-recv)
+# Both run the real sender and receiver (integration/e2e_fixture.hpp).
+foreach(test e2e_test fault_e2e_test)
+  tstream_add_test(${test} LABEL integration TIMEOUT 300 SOURCES integration/${test}.cpp)
+  target_compile_definitions(${test} PRIVATE
+    TSTREAM_BINARY="$<TARGET_FILE:tstream>"
+    TSTREAM_RECV_BINARY="$<TARGET_FILE:tstream-recv>"
+    TSTREAM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  add_dependencies(${test} tstream tstream-recv)
+endforeach()

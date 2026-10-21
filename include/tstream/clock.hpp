@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 
 namespace tstream {
@@ -18,6 +19,13 @@ inline std::int64_t to_ns(Clock::time_point t) {
 // Current steady_clock time in nanoseconds: the timestamp used everywhere.
 inline std::int64_t now_ns() {
   return to_ns(Clock::now());
+}
+
+inline constexpr std::int64_t kNsPerMs = 1'000'000;
+
+// Milliseconds (possibly fractional, as configured) to whole nanoseconds.
+inline std::int64_t ms_to_ns(double ms) {
+  return std::llround(ms * static_cast<double>(kNsPerMs));
 }
 
 }  // namespace tstream

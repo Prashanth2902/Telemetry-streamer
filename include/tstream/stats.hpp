@@ -34,6 +34,7 @@ struct SenderStats {
   double t_s = 0;  // seconds since the sender started
   std::vector<SourceStats> sources;
   std::uint64_t batches = 0;                   // handed to the sink
+  std::uint64_t health_events = 0;             // health samples injected (source 0)
   std::optional<TransportCounters> transport;  // set when the sink is TCP
 
   // Per-source counters summed over all sources.

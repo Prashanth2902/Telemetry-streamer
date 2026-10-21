@@ -3,7 +3,9 @@
 add_library(tstream_core STATIC
   config.cpp
   encoder.cpp
+  fault.cpp
   framing.cpp
+  health.cpp
   latency_histogram.cpp
   net.cpp
   pipeline.cpp
@@ -14,7 +16,11 @@ add_library(tstream_core STATIC
   stop_signal.cpp
   tcp_transport.cpp
   sources/fixed_rate_source.cpp
-  sources/sim_models.cpp)
+  sources/sim_models.cpp
+  monitors/frozen.cpp
+  monitors/rate.cpp
+  monitors/seq_gap.cpp
+  monitors/stale.cpp)
 add_library(tstream::core ALIAS tstream_core)
 target_include_directories(tstream_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_compile_features(tstream_core PUBLIC cxx_std_20)

@@ -28,6 +28,7 @@ SenderStats collect_stats(double t_s, const std::vector<std::unique_ptr<Source>>
   SenderStats stats;
   stats.t_s = t_s;
   stats.batches = pipeline.batches();
+  stats.health_events = pipeline.health_events();
   stats.sources.reserve(sources.size());
   for (std::size_t i = 0; i < sources.size(); ++i) {
     SourceStats s;
@@ -70,10 +71,11 @@ std::string format_stats_line(const SenderStats& now, const SenderStats& previou
   const SourceStats before = previous.totals();
   const double interval_s = std::max(now.t_s - previous.t_s, 1e-9);
   std::string line = fmt::format(
-      "stats t={:.1f}s generated={} rate={:.0f}/s ring_dropped={} delivered={} batches={}", now.t_s,
-      total.counters.generated,
+      "stats t={:.1f}s generated={} rate={:.0f}/s ring_dropped={} delivered={} batches={} "
+      "health={}",
+      now.t_s, total.counters.generated,
       static_cast<double>(total.counters.generated - before.counters.generated) / interval_s,
-      total.counters.dropped(), total.delivered, now.batches);
+      total.counters.dropped(), total.delivered, now.batches, now.health_events);
   if (now.transport) {
     const TransportCounters& t = *now.transport;
     line +=
@@ -99,9 +101,9 @@ std::vector<std::string> format_summary(const SenderStats& final_stats) {
   const SourceStats total = final_stats.totals();
   lines.push_back(fmt::format(
       "summary total generated={} dropped={} delivered={} tx_sent={} tx_dropped={} lost={} "
-      "batches={}",
+      "batches={} health_events={}",
       total.counters.generated, total.counters.dropped(), total.delivered, total.tx_sent,
-      total.tx_dropped, total_lost(final_stats), final_stats.batches));
+      total.tx_dropped, total_lost(final_stats), final_stats.batches, final_stats.health_events));
   if (tcp) {
     const TransportCounters& t = *final_stats.transport;
     lines.push_back(fmt::format(
