@@ -140,6 +140,7 @@ class FixedRateSource final : public Source {
   const PushPolicy push_policy_;
   const std::vector<Fault> faults_;   // this source's only
   std::vector<Sample> burst_buffer_;  // sized for the largest burst; producer thread only
+  std::vector<bool> burst_fired_;     // per entry of faults_; producer thread only
 
   std::atomic<bool> stop_requested_{false};
   std::atomic<std::uint64_t> generated_{0};

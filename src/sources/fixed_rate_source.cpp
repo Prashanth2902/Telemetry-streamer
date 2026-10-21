@@ -56,7 +56,8 @@ FixedRateSource::FixedRateSource(std::uint16_t id, std::string_view name, double
       model_(std::move(model)),
       push_policy_(push_policy),
       faults_(faults_for(id, faults)),
-      burst_buffer_(largest_burst(faults_)) {}
+      burst_buffer_(largest_burst(faults_)),
+      burst_fired_(faults_.size(), false) {}
 
 // Joins the thread if the owner didn't call stop().
 FixedRateSource::~FixedRateSource() {
@@ -90,12 +91,11 @@ SourceCounters FixedRateSource::counters() const {
 }
 
 // seq advances whether or not try_push succeeds, so drops become gaps
-// downstream. The burst flags are the only allocation, made before the loop.
+// downstream. Nothing here allocates: fault state was sized at construction.
 void FixedRateSource::run() {
   std::uint32_t seq = 0;
   const auto started = Clock::now();
   auto next = started;
-  std::vector<bool> burst_fired(faults_.size(), false);
   Sample last{};
   bool have_last = false;
 
@@ -112,9 +112,9 @@ void FixedRateSource::run() {
     emit(next_sample(seq, frozen, last));
     have_last = true;
     for (std::size_t i = 0; i < faults_.size(); ++i) {
-      if (faults_[i].kind == FaultKind::Burst && !burst_fired[i] &&
+      if (faults_[i].kind == FaultKind::Burst && !burst_fired_[i] &&
           elapsed >= faults_[i].start_ns) {
-        burst_fired[i] = true;
+        burst_fired_[i] = true;
         emit_burst(static_cast<std::size_t>(faults_[i].arg), seq, frozen, last);
       }
     }
