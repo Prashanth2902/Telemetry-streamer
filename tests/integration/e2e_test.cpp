@@ -139,7 +139,11 @@ TEST_F(E2eTest, SenderConnectsWhenReceiverStartsLater) {
             field(sent, "delivered"));
   EXPECT_GT(field(recv, "samples"), 0U);
   EXPECT_EQ(field(recv, "samples"), field(transport, "samples_sent"));
-  EXPECT_EQ(field(recv, "gaps"), 0U);  // it joined mid-stream, then nothing was lost
+  // The first K batches waited in the queue and arrived; the ones after them
+  // were dropped until the connection opened. Those drops are exactly the
+  // receiver's gaps (SPEC §13 reconciliation).
+  EXPECT_EQ(field(recv, "gaps"), field(transport, "samples_dropped"));
+  EXPECT_EQ(field(recv, "batch_seq_gaps"), field(transport, "batches_dropped"));
 }
 
 // SPEC §13: receiver restart triggers reconnect.
