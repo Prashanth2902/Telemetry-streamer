@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
-#include <limits>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
@@ -42,11 +41,8 @@ TcpTransport::TcpTransport(Options options)
       encoder_(options_.max_samples),
       backoff_(options_.initial_backoff),
       queue_(std::max<std::size_t>(options_.max_pending_batches, 1)),
-      index_of_(std::size_t{std::numeric_limits<std::uint16_t>::max()} + 1, 0) {
-  const std::size_t counters = options_.source_ids.size() + 1;  // [0] = "other"
-  for (std::size_t i = 0; i < options_.source_ids.size(); ++i) {
-    index_of_[options_.source_ids[i]] = static_cast<std::uint16_t>(i + 1);
-  }
+      index_of_(options_.source_ids) {
+  const std::size_t counters = index_of_.size();  // [0] = "other"
   tally_.resize(counters);
   sent_by_source_ = std::make_unique<std::atomic<std::uint64_t>[]>(counters);
   dropped_by_source_ = std::make_unique<std::atomic<std::uint64_t>[]>(counters);
@@ -173,12 +169,12 @@ TransportCounters TcpTransport::counters() const {
 
 // Unconfigured ids all share the "other" counter.
 std::uint64_t TcpTransport::samples_sent_for(std::uint16_t source_id) const {
-  return sent_by_source_[index_of(source_id)].load(std::memory_order_relaxed);
+  return sent_by_source_[index_of_(source_id)].load(std::memory_order_relaxed);
 }
 
 // Unconfigured ids all share the "other" counter.
 std::uint64_t TcpTransport::samples_dropped_for(std::uint16_t source_id) const {
-  return dropped_by_source_[index_of(source_id)].load(std::memory_order_relaxed);
+  return dropped_by_source_[index_of_(source_id)].load(std::memory_order_relaxed);
 }
 
 // One fd, so one event at most; EPOLLRDHUP and EPOLLIN both mean the peer is
@@ -329,7 +325,7 @@ void TcpTransport::update_interest() {
 void TcpTransport::tally(const BatchView& batch) {
   std::ranges::fill(tally_, 0U);
   for (const Sample& sample : batch.samples) {
-    ++tally_[index_of(sample.source_id)];
+    ++tally_[index_of_(sample.source_id)];
   }
 }
 
@@ -362,11 +358,6 @@ void TcpTransport::count_dropped(std::size_t samples, std::span<const std::uint3
   for (std::size_t i = 0; i < per_source.size(); ++i) {
     dropped_by_source_[i].fetch_add(per_source[i], std::memory_order_relaxed);
   }
-}
-
-// One table lookup; 0 for ids that weren't configured.
-std::size_t TcpTransport::index_of(std::uint16_t source_id) const {
-  return index_of_[source_id];
 }
 
 }  // namespace tstream

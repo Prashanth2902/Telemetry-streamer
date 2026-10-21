@@ -36,6 +36,7 @@
 #include "tstream/encoder.hpp"
 #include "tstream/net.hpp"
 #include "tstream/sink.hpp"
+#include "tstream/source_index.hpp"
 
 namespace tstream {
 
@@ -130,8 +131,6 @@ class TcpTransport final : public BatchSink {
   // Counts a frame's samples as sent or dropped.
   void count_sent(std::size_t samples, std::span<const std::uint32_t> per_source);
   void count_dropped(std::size_t samples, std::span<const std::uint32_t> per_source);
-  // Index into the per-source counters for an id.
-  [[nodiscard]] std::size_t index_of(std::uint16_t source_id) const;
 
   Options options_;
   SocketAddress address_;
@@ -149,7 +148,7 @@ class TcpTransport final : public BatchSink {
   std::size_t count_ = 0;
 
   // Source id -> counter index (0 = "other"), and a scratch tally per batch.
-  std::vector<std::uint16_t> index_of_;
+  SourceIndex index_of_;
   std::vector<std::uint32_t> tally_;
   std::unique_ptr<std::atomic<std::uint64_t>[]> sent_by_source_;
   std::unique_ptr<std::atomic<std::uint64_t>[]> dropped_by_source_;
