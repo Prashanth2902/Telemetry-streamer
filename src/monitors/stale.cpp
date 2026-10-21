@@ -1,12 +1,9 @@
+#include "tstream/clock.hpp"
 #include "tstream/monitors.hpp"
 
 #include "monitor_util.hpp"
 
 namespace tstream {
-
-namespace {
-constexpr std::int64_t kNsPerMs = 1'000'000;
-}  // namespace
 
 // Every source starts "last seen" at start_ns, so silence from the start counts.
 StaleMonitor::StaleMonitor(std::span<const SourceHealthThresholds> thresholds,

@@ -190,7 +190,7 @@ int run(const Options& options) {
            config.batch.max_samples, config.batch.max_delay_us);
   for (const tstream::Fault& fault : config.faults) {
     log_line("info", "fault {} on source {} at {} ms", tstream::fault_kind_name(fault.kind),
-             fault.source_id, fault.start_ns / 1'000'000);
+             fault.source_id, fault.start_ns / tstream::kNsPerMs);
   }
   pipeline.start();
   for (auto& source : sources) {

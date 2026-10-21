@@ -73,6 +73,10 @@ TEST(ParseFault, RejectsMalformedText) {
   expect_invalid("stall:1:100@-5", "start ms");
   expect_invalid("stall:1:100@0+50", "only applies to rate and freeze");
   expect_invalid("rate:1:2@0+", "duration ms");
+  expect_invalid("freeze:1:", "empty field");
+  expect_invalid("stall:1:100:", "empty field");
+  expect_invalid("slow_consumer:1.5", "integer");
+  expect_invalid("stall:1:0", "[1, 3600000]");
   expect_invalid("slow_consumer", "slow_consumer:<ms>");
   expect_invalid("slow_consumer:5@100", "slow_consumer:<ms>");
 }

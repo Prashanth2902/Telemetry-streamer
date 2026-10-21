@@ -2,20 +2,32 @@
 
 #include <charconv>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+
+#include "tstream/clock.hpp"
 
 namespace tstream {
 
 namespace {
 
-constexpr std::int64_t kNsPerMs = 1'000'000;
 constexpr double kMaxMs = 3'600'000;  // an hour: longer is surely a typo
 
 // Throws std::invalid_argument as "fault \"<text>\": <what>".
 [[noreturn]] void fail(std::string_view text, const std::string& what) {
   throw std::invalid_argument("fault \"" + std::string(text) + "\": " + what);
+}
+
+// "5" for whole numbers, "0.01" otherwise: for error messages.
+std::string number_text(double value) {
+  if (std::floor(value) == value) {
+    return std::to_string(static_cast<long long>(value));
+  }
+  std::ostringstream out;
+  out << value;
+  return out.str();
 }
 
 // A finite number in [min, max] spanning all of `field`.
@@ -25,15 +37,10 @@ double parse_number(std::string_view text, std::string_view field, const char* n
   const auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), value);
   if (ec != std::errc{} || end != field.data() + field.size() || !std::isfinite(value) ||
       value < min || value > max) {
-    fail(text, std::string(name) + " must be a number in [" + std::to_string(min) + ", " +
-                   std::to_string(max) + "], got \"" + std::string(field) + "\"");
+    fail(text, std::string(name) + " must be a number in [" + number_text(min) + ", " +
+                   number_text(max) + "], got \"" + std::string(field) + "\"");
   }
   return value;
-}
-
-// Milliseconds to whole nanoseconds.
-std::int64_t ms_to_ns(double ms) {
-  return std::llround(ms * static_cast<double>(kNsPerMs));
 }
 
 // Splits off everything before the first `sep`; `rest` keeps what follows.
@@ -81,6 +88,9 @@ bool Fault::active_at(std::int64_t elapsed_ns) const {
 
 // kind:source:arg, then the optional @start and +duration suffixes.
 Fault parse_fault(std::string_view text) {
+  if (text.ends_with(':')) {
+    fail(text, "empty field after ':'");
+  }
   std::string_view timing = text;
   std::string_view body = take_until(timing, '@');
   const bool has_timing = body.size() != text.size();
@@ -94,6 +104,9 @@ Fault parse_fault(std::string_view text) {
       fail(text, "expected slow_consumer:<ms>");
     }
     fault.arg = parse_number(text, rest, "ms", 1, 60'000);
+    if (std::floor(fault.arg) != fault.arg) {
+      fail(text, "slow_consumer ms must be an integer");
+    }
     return fault;
   }
 

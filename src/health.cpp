@@ -3,18 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
+#include "tstream/clock.hpp"
+
 namespace tstream {
 
-namespace {
-
-constexpr double kNsPerMs = 1e6;
-
-// Milliseconds to whole nanoseconds.
-std::int64_t ms_to_ns(double ms) {
-  return std::llround(ms * kNsPerMs);
-}
-
-}  // namespace
+namespace {}  // namespace
 
 // Unknown values read as "unknown" rather than failing: they come off the wire.
 std::string_view monitor_name(std::uint8_t monitor) {
