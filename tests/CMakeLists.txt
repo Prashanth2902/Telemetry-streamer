@@ -51,7 +51,7 @@ if(TSTREAM_SANITIZER STREQUAL "none")
 endif()
 
 # Both run the real sender and receiver (integration/e2e_fixture.hpp).
-foreach(test e2e_test)
+foreach(test e2e_test fault_e2e_test)
   tstream_add_test(${test} LABEL integration TIMEOUT 300 SOURCES integration/${test}.cpp)
   target_compile_definitions(${test} PRIVATE
     TSTREAM_BINARY="$<TARGET_FILE:tstream>"
